@@ -12,8 +12,11 @@
     {"id": "fault-code", "question": "F0002 是什么故障？", "expected_chunk_id": "g120-f0002", "expected_error_code": "F0002", "expected_equipment_model": "SINAMICS G120", "should_refuse": false},
     {"id": "similar-model", "question": "S7-1200 支持什么通信方式？", "expected_chunk_id": "s7-1200-comm", "expected_error_code": "", "expected_equipment_model": "S7-1200", "should_refuse": false},
     {"id": "parameter", "question": "P1080 参数有什么作用？", "expected_chunk_id": "g120-p1080", "expected_error_code": "", "expected_equipment_model": "SINAMICS G120", "should_refuse": false},
+    {"id": "rated-voltage", "question": "设备的额定输入电压是多少？", "expected_chunk_id": "g120-p1080", "expected_error_code": "", "expected_equipment_model": "SINAMICS G120", "should_refuse": false},
     {"id": "memory-address", "question": "MW20 的作用是什么？", "expected_chunk_id": "plc-mw20", "expected_error_code": "", "expected_equipment_model": "S7-1200", "should_refuse": false},
     {"id": "semantic", "question": "为什么变频器会发生直流侧过压？", "expected_chunk_id": "drive-dc-bus", "expected_error_code": "", "expected_equipment_model": "", "should_refuse": false},
+    {"id": "semantic-paraphrase-braking", "question": "驱动器减速停车时为什么会出现电压异常？", "expected_chunk_id": "g120-f0002", "expected_error_code": "", "expected_equipment_model": "SINAMICS G120", "should_refuse": false},
+    {"id": "semantic-paraphrase-energy", "question": "电机减速回馈能量时为何触发过压保护？", "expected_chunk_id": "g120-f0002", "expected_error_code": "", "expected_equipment_model": "SINAMICS G120", "should_refuse": false},
     {"id": "mixed", "question": "SINAMICS G120 的 F0002 应该怎么处理？", "expected_chunk_id": "g120-f0002", "expected_error_code": "F0002", "expected_equipment_model": "SINAMICS G120", "should_refuse": false},
     {"id": "ood", "question": "F9999 应该如何处理？", "expected_chunk_id": "", "expected_error_code": "F9999", "expected_equipment_model": "", "should_refuse": true}
   ]

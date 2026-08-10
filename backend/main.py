@@ -100,6 +100,8 @@ RAG_MODE = os.getenv("RAG_MODE", "light").strip().lower()
 if RAG_MODE not in {"full", "light"}:
     raise RuntimeError("RAG_MODE 只支持 full 或 light。")
 
+REQUESTED_RAG_MODE = RAG_MODE
+REQUESTED_RETRIEVAL_MODE = os.getenv("RETRIEVAL_MODE", "hybrid").strip().lower()
 RAG_BACKEND_NAME = "rag_core" if RAG_MODE == "full" else "light_rag_core"
 RAG_MODE_FALLBACK_REASON = ""
 
@@ -120,6 +122,12 @@ except ModuleNotFoundError as exc:
     RAG_MODE_FALLBACK_REASON = f"Full dependencies unavailable: {exc.name}"
     os.environ["RETRIEVAL_MODE"] = "lexical"
     rag_backend = _load_rag_backend(RAG_BACKEND_NAME)
+
+EFFECTIVE_RAG_MODE = RAG_MODE
+EFFECTIVE_RETRIEVAL_MODE = os.getenv(
+    "RETRIEVAL_MODE",
+    "hybrid",
+).strip().lower()
 
 if __package__:
     llm_module = importlib.import_module(".llm_client", package=__package__)
@@ -1395,7 +1403,13 @@ def health(
         "pdf_count": pdf_count,
     }
     if RAG_MODE_FALLBACK_REASON:
-        response["retrieval_fallback"] = RAG_MODE_FALLBACK_REASON
+        response["retrieval_fallback"] = {
+            "requested_rag_mode": REQUESTED_RAG_MODE,
+            "effective_rag_mode": EFFECTIVE_RAG_MODE,
+            "requested_retrieval_mode": REQUESTED_RETRIEVAL_MODE,
+            "effective_retrieval_mode": EFFECTIVE_RETRIEVAL_MODE,
+            "reason": RAG_MODE_FALLBACK_REASON,
+        }
     if knowledge_base_id == PUBLIC_KNOWLEDGE_BASE_ID:
         sync_status = public_version_synchronizer.status()
         response["version_sync"] = sync_status

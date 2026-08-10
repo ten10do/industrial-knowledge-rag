@@ -457,15 +457,31 @@ def _lexical_candidates(question: str, documents: list, analysis, top_k: int):
     ]
 
 
-def _vector_candidates(question: str, knowledge_base_id: str, analysis, top_k: int):
-    results = load_vector_db(knowledge_base_id).similarity_search_with_score(question, k=top_k)
+def _vector_candidates(
+    question: str,
+    knowledge_base_id: str,
+    analysis,
+    top_k: int,
+    allowed_chunk_ids: set[str] | None = None,
+):
+    results = load_vector_db(knowledge_base_id).similarity_search_with_score(
+        question,
+        k=max(top_k, len(allowed_chunk_ids or ())),
+    )
+    if allowed_chunk_ids:
+        results = [
+            (document, score)
+            for document, score in results
+            if str((getattr(document, "metadata", {}) or {}).get("chunk_id", ""))
+            in allowed_chunk_ids
+        ]
     return [
         RetrievalCandidate(
             document=document, retrieval_source="vector", vector_rank=rank,
             vector_score=float(score), evidence_score=float(score),
             exact_metadata_match=has_exact_metadata_match(document, analysis),
         )
-        for rank, (document, score) in enumerate(results, start=1)
+        for rank, (document, score) in enumerate(results[:top_k], start=1)
     ]
 
 
@@ -493,6 +509,10 @@ def retrieve_docs(
             vector = _vector_candidates(
                 question, knowledge_base_id, analysis,
                 _positive_int("VECTOR_TOP_K", DEFAULT_VECTOR_TOP_K),
+                {
+                    str((getattr(document, "metadata", {}) or {}).get("chunk_id", ""))
+                    for document in documents
+                },
             )
         except Exception:
             if mode == "vector":
@@ -538,13 +558,12 @@ def filter_relevant_docs(scored_docs):
             candidate for candidate in candidates
             if candidate.exact_metadata_match
             or (
-                candidate.vector_score is not None
-                and candidate.evidence_score <= get_relevance_threshold()
+                candidate.lexical_score is not None
+                and candidate.lexical_score > 0
             )
             or (
-                candidate.vector_score is None
-                and candidate.lexical_score is not None
-                and candidate.lexical_score > 0
+                candidate.vector_score is not None
+                and candidate.evidence_score <= get_relevance_threshold()
             )
         ])
     threshold = get_relevance_threshold()

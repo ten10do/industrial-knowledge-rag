@@ -89,9 +89,19 @@ Verified:
 - Unit coverage for tokenizer, BM25, query analysis/filter fallback, RRF deduplication, unified candidates, API validation, and unknown identifier refusal.
 - The synthetic V2 benchmark measures Hit@1/3, MRR, exact identifier/fault/model metrics, model confusion, OOD refusal, and median retrieval latency.
 
-Blocked / environment-dependent:
+## V2.5 Full Vector Validation
 
-- The current venv has not installed `backend/requirements-full.txt`; the Full Chroma/HuggingFace path and its real vector/hybrid benchmark are therefore not claimed as verified. Installing dependencies alone is insufficient to claim it: the configured embedding model must also be available without an uncontrolled download.
+Verified with the existing `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` model, `HuggingFaceEmbeddings`, and temporary Chroma collections. The real smoke test passes V1 industrial chunks through `ingest_pages`, embeddings, Chroma persistence, a vector query, and citation metadata recovery. The model/cache and temporary databases remain outside Git.
+
+`backend/evaluation/full_vector_benchmark.py` compares the same documents, chunks, cases, and labels across legacy TF-IDF, BM25, Dense Vector (HuggingFace + Chroma), and BM25 + Dense Vector + RRF. It also reports per-query ranks, vector debug metadata/distances, warm retrieval latency, semantic-query Hit@1, and Hybrid Win Rate.
+
+The benchmark is deliberately small and synthetic. It validates the retrieval wiring and exposes failure modes; it does not claim production accuracy. The `RUN_FULL_VECTOR_SMOKE=1` test opt-in performs the real model/Chroma smoke test, while normal test runs stay offline and fast.
+
+Environment notes:
+
+- `backend/requirements-full.txt` is the authoritative dependency declaration and now installs cleanly with `pip check`.
+- The configured model is cached by HuggingFace outside the repository. Windows may warn when its cache cannot use symlinks; this is a storage-efficiency warning, not a retrieval fallback.
+- Full dependency failure remains safe: startup records requested/effective RAG and retrieval modes and falls back to light/BM25 instead of claiming a dense hybrid run.
 
 ## 本地运行
 
@@ -133,6 +143,9 @@ npm.cmd run dev
 ```powershell
 .\venv\Scripts\python.exe -m pytest
 .\venv\Scripts\python.exe -m backend.evaluation.retrieval_benchmark
+.\venv\Scripts\python.exe -m backend.evaluation.full_vector_benchmark
+# Optional real Full smoke gate (downloads/loads the configured embedding model)
+$env:RUN_FULL_VECTOR_SMOKE="1"; .\venv\Scripts\python.exe -m pytest backend\test_full_vector_smoke.py
 cd frontend
 npm.cmd test
 npm.cmd run build
@@ -147,7 +160,7 @@ npm.cmd run build
 ```text
 V0 Base RAG
   -> V1 Industrial Document RAG (implemented)
-  -> V2 Hybrid Retrieval (implemented; Full vector verification environment-dependent)
+  -> V2 Hybrid Retrieval (implemented and Full Vector validated)
   -> V3 Reranker
   -> V4 RAG Evaluation
   -> V5 Observable Industrial RAG
