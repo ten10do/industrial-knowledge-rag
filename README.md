@@ -165,3 +165,20 @@ V0 Base RAG
   -> V4 RAG Evaluation
   -> V5 Observable Industrial RAG
 ```
+
+## Evaluation Strategy
+
+The repository keeps three intentionally different evaluation layers:
+
+- **Unit fixtures** are small deterministic regression inputs. They validate parser, metadata, filtering, and retrieval behavior after code changes.
+- **Industrial challenge benchmark** is a committed, hand-authored set of 13 small chunks and 35 harder queries. It covers close identifiers and models, section confusion, paraphrases, procedures, parameters, safety, maintenance, and three OOD kinds. It is a repeatable stress test, not a production-accuracy claim.
+- **Private real-world corpus** is optional local data at `backend/evaluation/benchmark_private/`. The directory is ignored by Git. Put legally obtained PDFs and a compatible `manifest.json` there with `commit_allowed: false`; no original vendor document, benchmark output, Chroma database, or model cache is committed.
+
+Run the unified runner from the repository root:
+
+```powershell
+.\venv\Scripts\python.exe -m backend.evaluation.benchmark_runner --dataset challenge --mode all
+.\venv\Scripts\python.exe -m backend.evaluation.benchmark_runner --dataset private --mode hybrid
+```
+
+The JSON report includes Hit@1, Hit@3, Recall@5, MRR, OOD refusal accuracy, category metrics, Ranking Gap (`Recall@5 - Hit@1`), warm retrieval latency, deterministic failure classes, and a per-query Top-5 report. Private evaluation remains `REAL_CORPUS_GATE_NOT_RUN` until a local ignored manifest is supplied. Synthetic results must not be presented as real industrial accuracy.
