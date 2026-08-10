@@ -28,6 +28,16 @@ class RetrievalCandidate:
 class RetrievalResult(list):
     """Legacy tuple-compatible retrieval output plus V2 candidate details."""
 
-    def __init__(self, candidates: list[RetrievalCandidate]):
+    def __init__(
+        self,
+        candidates: list[RetrievalCandidate],
+        *,
+        query_analysis=None,
+        corpus_documents: list | None = None,
+        retrieval_mode: str = "",
+    ):
         self.candidates = candidates
+        self.query_analysis = query_analysis
+        self.corpus_documents = corpus_documents or []
+        self.retrieval_mode = retrieval_mode
         super().__init__((candidate.document, candidate.evidence_score) for candidate in candidates)

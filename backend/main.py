@@ -149,6 +149,7 @@ has_relevant_docs = rag_backend.has_relevant_docs
 is_knowledge_base_ready = rag_backend.is_knowledge_base_ready
 retrieve_docs = rag_backend.retrieve_docs
 filter_relevant_docs = rag_backend.filter_relevant_docs
+analyze_evidence = rag_backend.analyze_evidence
 get_data_dir = rag_backend.get_data_dir
 get_index_storage_path = rag_backend.get_index_storage_path
 reload_knowledge_base = rag_backend.reload_knowledge_base
@@ -364,6 +365,7 @@ class AskResponse(BaseModel):
     answer: str
     sources: list[SourceItem]
     is_refused: bool
+    evidence: dict | None = None
     conversation_context: ConversationContext | None = None
 
 
@@ -1515,15 +1517,31 @@ def ask(
             }
             if request.retrieval_mode:
                 retrieval_arguments["retrieval_mode"] = request.retrieval_mode
-            docs = retrieve_docs(context_result.standalone_query, **retrieval_arguments)
+            raw_docs = retrieve_docs(context_result.standalone_query, **retrieval_arguments)
 
-        docs = filter_relevant_docs(docs)
+        docs = filter_relevant_docs(raw_docs)
         sources = serialize_sources(docs)
+        evidence = None
+        if hasattr(raw_docs, "candidates"):
+            evidence = analyze_evidence(
+                context_result.standalone_query,
+                raw_docs,
+                request.retrieval_mode,
+            )
+            if evidence.decision == "ABSTAIN":
+                return AskResponse(
+                    answer=REFUSAL_MESSAGE,
+                    sources=[],
+                    is_refused=True,
+                    evidence=evidence.as_dict(),
+                    conversation_context=context_metadata,
+                )
         if not has_relevant_docs(docs):
             return AskResponse(
                 answer=REFUSAL_MESSAGE,
                 sources=sources,
                 is_refused=True,
+                evidence=evidence.as_dict() if evidence else None,
                 conversation_context=context_metadata,
             )
 
@@ -1547,6 +1565,7 @@ def ask(
             answer=answer,
             sources=sources,
             is_refused=False,
+            evidence=evidence.as_dict() if evidence else None,
             conversation_context=context_metadata,
         )
     except ModelGovernanceError as exc:

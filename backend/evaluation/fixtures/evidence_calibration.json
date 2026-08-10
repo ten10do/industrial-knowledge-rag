@@ -1,0 +1,23 @@
+{
+  "name": "evidence-calibration-v1",
+  "queries": [
+    {"query_id":"cal-a01","query":"F0001 的输入侧检查项目是什么？","answerable":true,"relevant_chunk_ids":["G120-F0001"],"ood_type":""},
+    {"query_id":"cal-a02","query":"P1080 是限制哪项输出设定？","answerable":true,"relevant_chunk_ids":["G120-P1080"],"ood_type":""},
+    {"query_id":"cal-a03","query":"G120 使用什么额定三相电源？","answerable":true,"relevant_chunk_ids":["G120-RATING"],"ood_type":""},
+    {"query_id":"cal-a04","query":"电机制动回馈使直流母线升高时该怎么办？","answerable":true,"relevant_chunk_ids":["G120-F0002"],"ood_type":""},
+    {"query_id":"cal-a05","query":"首次试运转前必须检查保护地吗？","answerable":true,"relevant_chunk_ids":["G120-STARTUP"],"ood_type":""},
+    {"query_id":"cal-a06","query":"维护隔离后为什么要等待直流母线放电？","answerable":true,"relevant_chunk_ids":["G120-SAFETY"],"ood_type":""},
+    {"query_id":"cal-a07","query":"G120 的滤网点检属于哪项维护？","answerable":true,"relevant_chunk_ids":["G120-MAINT"],"ood_type":""},
+    {"query_id":"cal-a08","query":"S7-1200 的 MW20 是多少位的字？","answerable":true,"relevant_chunk_ids":["S71200-MW20"],"ood_type":""},
+    {"query_id":"cal-a09","query":"0x8001 通信异常应该核对服务的什么配置？","answerable":true,"relevant_chunk_ids":["PLC-0X8001"],"ood_type":""},
+    {"query_id":"cal-a10","query":"40001 在示例中属于什么类型的寄存器？","answerable":true,"relevant_chunk_ids":["PLC-40001"],"ood_type":""},
+    {"query_id":"cal-o01","query":"F8888 在 G120 上的维修措施是什么？","answerable":false,"relevant_chunk_ids":[],"ood_type":"unknown_identifier"},
+    {"query_id":"cal-o02","query":"P9999 的默认数值是多少？","answerable":false,"relevant_chunk_ids":[],"ood_type":"unknown_identifier"},
+    {"query_id":"cal-o03","query":"0xFFFF 通信代码说明什么？","answerable":false,"relevant_chunk_ids":[],"ood_type":"unknown_identifier"},
+    {"query_id":"cal-o04","query":"ABB ACS880 的 P2000 应该如何设置？","answerable":false,"relevant_chunk_ids":[],"ood_type":"unknown_model"},
+    {"query_id":"cal-o05","query":"G120 安装螺栓推荐使用多少 N·m 扭矩？","answerable":false,"relevant_chunk_ids":[],"ood_type":"unsupported_detail"},
+    {"query_id":"cal-o06","query":"G120 内部 IGBT 的推荐更换周期是多少？","answerable":false,"relevant_chunk_ids":[],"ood_type":"unsupported_detail"},
+    {"query_id":"cal-o07","query":"S7-1500 是否支持本库未说明的 OPC UA 证书轮换步骤？","answerable":false,"relevant_chunk_ids":[],"ood_type":"unsupported_procedure"},
+    {"query_id":"cal-o08","query":"Rockwell PowerFlex 525 的 F0002 如何处理？","answerable":false,"relevant_chunk_ids":[],"ood_type":"cross_equipment"}
+  ]
+}

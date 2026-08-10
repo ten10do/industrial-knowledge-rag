@@ -182,3 +182,19 @@ Run the unified runner from the repository root:
 ```
 
 The JSON report includes Hit@1, Hit@3, Recall@5, MRR, OOD refusal accuracy, category metrics, Ranking Gap (`Recall@5 - Hit@1`), warm retrieval latency, deterministic failure classes, and a per-query Top-5 report. Private evaluation remains `REAL_CORPUS_GATE_NOT_RUN` until a local ignored manifest is supplied. Synthetic results must not be presented as real industrial accuracy.
+
+## Evidence-based Refusal
+
+Retriever candidates are not proof that the knowledge base can answer. After retrieval, the backend performs an explainable evidence check before any answer-generation call:
+
+```text
+Query -> Retrieval -> Evidence Analysis -> ANSWER / ABSTAIN -> LLM
+```
+
+The gate uses exact industrial identifier availability, equipment-model agreement, calibrated Chroma vector distance, and whether a requested concrete detail is present in retrieved text. RRF fusion score is deliberately not used as a confidence probability. Unknown identifiers and models, or insufficient supporting detail, return the existing evidence-insufficient response with no citations and skip the LLM. This reduces unsupported answers; it does not claim to eliminate hallucination.
+
+The calibrated evidence benchmark is separate from the frozen V2.6 challenge queries:
+
+```powershell
+.\venv\Scripts\python.exe -m backend.evaluation.evidence_benchmark
+```

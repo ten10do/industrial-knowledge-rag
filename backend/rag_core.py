@@ -15,14 +15,14 @@ if __package__:
     from .ingestion import PageText, ingest_pages
     from .learning_content import generate_hierarchical_learning_content
     from .llm_client import generate_llm_answer
-    from .retrieval import RetrievalCandidate, RetrievalResult, analyze_query, filter_documents, rrf_fuse
+    from .retrieval import RetrievalCandidate, RetrievalResult, analyze_query, analyze_retrieval_evidence, filter_documents, rrf_fuse
     from .retrieval.bm25 import BM25Index
     from .retrieval.filters import has_exact_metadata_match
 else:
     from ingestion import PageText, ingest_pages
     from learning_content import generate_hierarchical_learning_content
     from llm_client import generate_llm_answer
-    from retrieval import RetrievalCandidate, RetrievalResult, analyze_query, filter_documents, rrf_fuse
+    from retrieval import RetrievalCandidate, RetrievalResult, analyze_query, analyze_retrieval_evidence, filter_documents, rrf_fuse
     from retrieval.bm25 import BM25Index
     from retrieval.filters import has_exact_metadata_match
 
@@ -494,14 +494,18 @@ def retrieve_docs(
     if not question or not question.strip():
         raise ValueError("问题不能为空。")
     documents = _all_documents(knowledge_base_id)
+    all_documents = documents
     analysis = analyze_query(question, documents)
+    mode = get_retrieval_mode(retrieval_mode)
     documents, filter_applied = filter_documents(documents, analysis)
     if analysis.error_code and not filter_applied:
-        return RetrievalResult([])
+        return RetrievalResult(
+            [], query_analysis=analysis, corpus_documents=all_documents,
+            retrieval_mode=mode,
+        )
     lexical = _lexical_candidates(
         question, documents, analysis, _positive_int("LEXICAL_TOP_K", DEFAULT_LEXICAL_TOP_K)
     )
-    mode = get_retrieval_mode(retrieval_mode)
     if mode == "lexical":
         candidates = lexical[:k]
     else:
@@ -529,7 +533,20 @@ def retrieve_docs(
         )
     for rank, candidate in enumerate(candidates, start=1):
         candidate.final_rank = rank
-    return RetrievalResult(candidates)
+    return RetrievalResult(
+        candidates, query_analysis=analysis,
+        corpus_documents=all_documents, retrieval_mode=mode,
+    )
+
+
+def analyze_evidence(question: str, result, retrieval_mode: str | None = None, *, policy=None):
+    return analyze_retrieval_evidence(
+        question,
+        result,
+        getattr(result, "corpus_documents", []),
+        get_retrieval_mode(retrieval_mode or getattr(result, "retrieval_mode", None)),
+        policy=policy,
+    )
 
 
 def has_relevant_docs(scored_docs):

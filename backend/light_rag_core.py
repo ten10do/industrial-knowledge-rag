@@ -12,13 +12,13 @@ if __package__:
     from .ingestion import PageText, ingest_pages
     from .learning_content import generate_hierarchical_learning_content
     from .llm_client import generate_llm_answer
-    from .retrieval import BM25Index, RetrievalCandidate, RetrievalResult, analyze_query, filter_documents, rrf_fuse
+    from .retrieval import BM25Index, RetrievalCandidate, RetrievalResult, analyze_query, analyze_retrieval_evidence, filter_documents, rrf_fuse
     from .retrieval.filters import has_exact_metadata_match
 else:
     from ingestion import PageText, ingest_pages
     from learning_content import generate_hierarchical_learning_content
     from llm_client import generate_llm_answer
-    from retrieval import BM25Index, RetrievalCandidate, RetrievalResult, analyze_query, filter_documents, rrf_fuse
+    from retrieval import BM25Index, RetrievalCandidate, RetrievalResult, analyze_query, analyze_retrieval_evidence, filter_documents, rrf_fuse
     from retrieval.filters import has_exact_metadata_match
 
 
@@ -384,14 +384,17 @@ def retrieve_docs(
 
     index = _knowledge_bases[knowledge_base_id]
     analysis = analyze_query(question, index.documents)
+    mode = get_retrieval_mode(retrieval_mode)
     documents, filter_applied = filter_documents(index.documents, analysis)
     if analysis.error_code and not filter_applied:
-        return RetrievalResult([])
+        return RetrievalResult(
+            [], query_analysis=analysis, corpus_documents=index.documents,
+            retrieval_mode=mode,
+        )
     if documents is not index.documents:
         filtered_index = _fit_index(documents)
     else:
         filtered_index = index
-    mode = get_retrieval_mode(retrieval_mode)
     lexical = _lexical_candidates(
         filtered_index,
         question,
@@ -419,7 +422,20 @@ def retrieve_docs(
         )
     for rank, candidate in enumerate(candidates, start=1):
         candidate.final_rank = rank
-    return RetrievalResult(candidates)
+    return RetrievalResult(
+        candidates, query_analysis=analysis, corpus_documents=index.documents,
+        retrieval_mode=mode,
+    )
+
+
+def analyze_evidence(question: str, result, retrieval_mode: str | None = None, *, policy=None):
+    return analyze_retrieval_evidence(
+        question,
+        result,
+        getattr(result, "corpus_documents", []),
+        get_retrieval_mode(retrieval_mode or getattr(result, "retrieval_mode", None)),
+        policy=policy,
+    )
 
 
 def has_relevant_docs(scored_docs):
