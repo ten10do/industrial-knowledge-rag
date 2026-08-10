@@ -101,11 +101,29 @@ if RAG_MODE not in {"full", "light"}:
     raise RuntimeError("RAG_MODE 只支持 full 或 light。")
 
 RAG_BACKEND_NAME = "rag_core" if RAG_MODE == "full" else "light_rag_core"
+RAG_MODE_FALLBACK_REASON = ""
+
+
+def _load_rag_backend(name: str):
+    if __package__:
+        return importlib.import_module(f".{name}", package=__package__)
+    return importlib.import_module(name)
+
+
+try:
+    rag_backend = _load_rag_backend(RAG_BACKEND_NAME)
+except ModuleNotFoundError as exc:
+    if RAG_MODE != "full":
+        raise
+    RAG_MODE = "light"
+    RAG_BACKEND_NAME = "light_rag_core"
+    RAG_MODE_FALLBACK_REASON = f"Full dependencies unavailable: {exc.name}"
+    os.environ["RETRIEVAL_MODE"] = "lexical"
+    rag_backend = _load_rag_backend(RAG_BACKEND_NAME)
+
 if __package__:
-    rag_backend = importlib.import_module(f".{RAG_BACKEND_NAME}", package=__package__)
     llm_module = importlib.import_module(".llm_client", package=__package__)
 else:
-    rag_backend = importlib.import_module(RAG_BACKEND_NAME)
     llm_module = importlib.import_module("llm_client")
 
 DATA_DIR = rag_backend.DATA_DIR
@@ -282,6 +300,7 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
     model_provider: ModelProvider = "Groq"
     top_k: int = Field(default=4, ge=1, le=8)
+    retrieval_mode: Literal["lexical", "vector", "hybrid"] | None = None
     conversation_id: str | None = Field(
         default=None,
         max_length=MAX_CONVERSATION_ID_CHARS,
@@ -324,6 +343,13 @@ class SourceItem(BaseModel):
     knowledge_type: str = ""
     error_code: str = ""
     chunk_id: str = ""
+    retrieval_source: str = ""
+    lexical_rank: int | None = None
+    vector_rank: int | None = None
+    lexical_score: float | None = None
+    vector_score: float | None = None
+    fusion_score: float | None = None
+    final_rank: int | None = None
 
 
 class AskResponse(BaseModel):
@@ -1249,8 +1275,10 @@ def publish_public_version_event(version_id: str) -> None:
 
 def serialize_sources(docs):
     sources = []
+    candidates = getattr(docs, "candidates", [])
 
     for index, (doc, score) in enumerate(docs, start=1):
+        candidate = candidates[index - 1] if index <= len(candidates) else None
         metadata = getattr(doc, "metadata", {}) or {}
         source = Path(str(metadata.get("source", "未知来源"))).name
         page = metadata.get("page", "未知页码")
@@ -1286,6 +1314,13 @@ def serialize_sources(docs):
                 knowledge_type=str(metadata.get("knowledge_type", "")),
                 error_code=str(metadata.get("error_code", "")),
                 chunk_id=str(metadata.get("chunk_id", "")),
+                retrieval_source=(candidate.retrieval_source if candidate else ""),
+                lexical_rank=(candidate.lexical_rank if candidate else None),
+                vector_rank=(candidate.vector_rank if candidate else None),
+                lexical_score=(candidate.lexical_score if candidate else None),
+                vector_score=(candidate.vector_score if candidate else None),
+                fusion_score=(candidate.fusion_score if candidate else None),
+                final_rank=(candidate.final_rank if candidate else None),
             )
         )
 
@@ -1359,6 +1394,8 @@ def health(
         "knowledge_base_ready": ready,
         "pdf_count": pdf_count,
     }
+    if RAG_MODE_FALLBACK_REASON:
+        response["retrieval_fallback"] = RAG_MODE_FALLBACK_REASON
     if knowledge_base_id == PUBLIC_KNOWLEDGE_BASE_ID:
         sync_status = public_version_synchronizer.status()
         response["version_sync"] = sync_status
@@ -1458,11 +1495,13 @@ def ask(
             },
         )
         with get_knowledge_base_lock(knowledge_base_id):
-            docs = retrieve_docs(
-                context_result.standalone_query,
-                k=request.top_k,
-                knowledge_base_id=knowledge_base_id,
-            )
+            retrieval_arguments = {
+                "k": request.top_k,
+                "knowledge_base_id": knowledge_base_id,
+            }
+            if request.retrieval_mode:
+                retrieval_arguments["retrieval_mode"] = request.retrieval_mode
+            docs = retrieve_docs(context_result.standalone_query, **retrieval_arguments)
 
         docs = filter_relevant_docs(docs)
         sources = serialize_sources(docs)

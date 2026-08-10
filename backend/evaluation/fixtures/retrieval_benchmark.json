@@ -1,0 +1,20 @@
+{
+  "description": "Small synthetic V2 retrieval regression benchmark; not a production accuracy claim.",
+  "documents": [
+    {"content": "SINAMICS G120 fault F0002: DC link overvoltage. Extend deceleration time and inspect the braking unit.", "metadata": {"source": "g120_faults.pdf", "document_id": "g120-faults", "chunk_id": "g120-f0002", "equipment_model": "SINAMICS G120", "equipment_type": "drive", "manufacturer": "Siemens", "document_type": "fault_code", "knowledge_type": "fault", "error_code": "F0002", "page": 0}},
+    {"content": "S7-1200 communication manual: PROFINET and Modbus TCP are supported communication methods.", "metadata": {"source": "s7-1200_manual.pdf", "document_id": "s7-1200", "chunk_id": "s7-1200-comm", "equipment_model": "S7-1200", "equipment_type": "PLC", "manufacturer": "Siemens", "document_type": "manual", "knowledge_type": "parameter", "error_code": "", "page": 0}},
+    {"content": "S7-1500 communication manual: PROFINET IO and OPC UA are available for advanced controller integration.", "metadata": {"source": "s7-1500_manual.pdf", "document_id": "s7-1500", "chunk_id": "s7-1500-comm", "equipment_model": "S7-1500", "equipment_type": "PLC", "manufacturer": "Siemens", "document_type": "manual", "knowledge_type": "parameter", "error_code": "", "page": 0}},
+    {"content": "G120 parameter P1080 sets the maximum motor speed. Rated input voltage is 400 V AC.", "metadata": {"source": "g120_parameters.pdf", "document_id": "g120-parameters", "chunk_id": "g120-p1080", "equipment_model": "SINAMICS G120", "equipment_type": "drive", "manufacturer": "Siemens", "document_type": "technical_spec", "knowledge_type": "parameter", "error_code": "", "page": 1}},
+    {"content": "PLC memory word MW20 stores the conveyor speed setpoint before the program copies it to the drive command.", "metadata": {"source": "plc_memory.pdf", "document_id": "plc-memory", "chunk_id": "plc-mw20", "equipment_model": "S7-1200", "equipment_type": "PLC", "manufacturer": "Siemens", "document_type": "manual", "knowledge_type": "parameter", "error_code": "", "page": 2}},
+    {"content": "When the DC bus voltage exceeds the permitted range during deceleration, the inverter raises an overvoltage fault.", "metadata": {"source": "drive_theory.pdf", "document_id": "drive-theory", "chunk_id": "drive-dc-bus", "equipment_model": "", "equipment_type": "drive", "manufacturer": "", "document_type": "manual", "knowledge_type": "fault", "error_code": "", "page": 3}}
+  ],
+  "cases": [
+    {"id": "fault-code", "question": "F0002 是什么故障？", "expected_chunk_id": "g120-f0002", "expected_error_code": "F0002", "expected_equipment_model": "SINAMICS G120", "should_refuse": false},
+    {"id": "similar-model", "question": "S7-1200 支持什么通信方式？", "expected_chunk_id": "s7-1200-comm", "expected_error_code": "", "expected_equipment_model": "S7-1200", "should_refuse": false},
+    {"id": "parameter", "question": "P1080 参数有什么作用？", "expected_chunk_id": "g120-p1080", "expected_error_code": "", "expected_equipment_model": "SINAMICS G120", "should_refuse": false},
+    {"id": "memory-address", "question": "MW20 的作用是什么？", "expected_chunk_id": "plc-mw20", "expected_error_code": "", "expected_equipment_model": "S7-1200", "should_refuse": false},
+    {"id": "semantic", "question": "为什么变频器会发生直流侧过压？", "expected_chunk_id": "drive-dc-bus", "expected_error_code": "", "expected_equipment_model": "", "should_refuse": false},
+    {"id": "mixed", "question": "SINAMICS G120 的 F0002 应该怎么处理？", "expected_chunk_id": "g120-f0002", "expected_error_code": "F0002", "expected_equipment_model": "SINAMICS G120", "should_refuse": false},
+    {"id": "ood", "question": "F9999 应该如何处理？", "expected_chunk_id": "", "expected_error_code": "F9999", "expected_equipment_model": "", "should_refuse": true}
+  ]
+}

@@ -12,10 +12,14 @@ if __package__:
     from .ingestion import PageText, ingest_pages
     from .learning_content import generate_hierarchical_learning_content
     from .llm_client import generate_llm_answer
+    from .retrieval import BM25Index, RetrievalCandidate, RetrievalResult, analyze_query, filter_documents, rrf_fuse
+    from .retrieval.filters import has_exact_metadata_match
 else:
     from ingestion import PageText, ingest_pages
     from learning_content import generate_hierarchical_learning_content
     from llm_client import generate_llm_answer
+    from retrieval import BM25Index, RetrievalCandidate, RetrievalResult, analyze_query, filter_documents, rrf_fuse
+    from retrieval.filters import has_exact_metadata_match
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -29,6 +33,11 @@ MAX_RELEVANT_DISTANCE = 0.81
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 150
 DEFAULT_MAX_KNOWLEDGE_BASE_CHUNKS = 240
+DEFAULT_RETRIEVAL_MODE = "hybrid"
+DEFAULT_LEXICAL_TOP_K = 10
+DEFAULT_VECTOR_TOP_K = 10
+DEFAULT_HYBRID_TOP_K = 5
+DEFAULT_RRF_K = 60
 
 
 @dataclass
@@ -42,6 +51,7 @@ class LightKnowledgeBase:
     documents: list
     vectorizer: object
     tfidf_matrix: object
+    bm25: BM25Index
 
 
 _knowledge_bases: dict[str, LightKnowledgeBase] = {}
@@ -85,7 +95,12 @@ def _fit_index(documents) -> LightKnowledgeBase:
     tfidf_matrix = vectorizer.fit_transform(
         [document.page_content for document in documents]
     )
-    return LightKnowledgeBase(documents, vectorizer, tfidf_matrix)
+    return LightKnowledgeBase(
+        documents,
+        vectorizer,
+        tfidf_matrix,
+        BM25Index([document.page_content for document in documents]),
+    )
 
 
 def _max_knowledge_base_chunks() -> int:
@@ -296,12 +311,71 @@ def is_knowledge_base_ready(knowledge_base_id: str = "default"):
         bool(index.documents)
         and index.vectorizer is not None
         and index.tfidf_matrix is not None
+        and index.bm25 is not None
     )
 
 
-def retrieve_docs(question: str, k: int = 4, knowledge_base_id: str = "default"):
-    from sklearn.metrics.pairwise import cosine_similarity
+def _positive_int(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return value if value > 0 else default
 
+
+def get_retrieval_mode(mode: str | None = None) -> str:
+    selected = (mode or os.getenv("RETRIEVAL_MODE", DEFAULT_RETRIEVAL_MODE)).lower()
+    aliases = {"bm25": "lexical", "tfidf": "vector"}
+    selected = aliases.get(selected, selected)
+    if selected not in {"lexical", "vector", "hybrid"}:
+        raise ValueError("RETRIEVAL_MODE must be lexical, vector, or hybrid.")
+    return selected
+
+
+def _lexical_candidates(index, question: str, documents: list, analysis, top_k: int):
+    scores = index.bm25.score(question)
+    ranked = sorted(
+        range(len(documents)),
+        key=lambda item: (-scores[item], str(documents[item].metadata.get("chunk_id", ""))),
+    )[: min(top_k, len(documents))]
+    return [
+        RetrievalCandidate(
+            document=documents[item],
+            retrieval_source="lexical",
+            lexical_rank=rank,
+            lexical_score=float(scores[item]),
+            evidence_score=0.0 if scores[item] > 0 else 1.0,
+            exact_metadata_match=has_exact_metadata_match(documents[item], analysis),
+        )
+        for rank, item in enumerate(ranked, start=1)
+        if scores[item] > 0
+    ]
+
+
+def _tfidf_candidates(index, question: str, documents: list, analysis, top_k: int):
+    from sklearn.metrics.pairwise import cosine_similarity
+    query_vector = index.vectorizer.transform([question.strip()])
+    similarities = cosine_similarity(query_vector, index.tfidf_matrix).ravel()
+    ranked = similarities.argsort()[::-1][: min(top_k, len(documents))]
+    return [
+        RetrievalCandidate(
+            document=documents[item],
+            retrieval_source="vector",
+            vector_rank=rank,
+            vector_score=float(similarities[item]),
+            evidence_score=float(1.0 - similarities[item]),
+            exact_metadata_match=has_exact_metadata_match(documents[item], analysis),
+        )
+        for rank, item in enumerate(ranked, start=1)
+    ]
+
+
+def retrieve_docs(
+    question: str,
+    k: int = 4,
+    knowledge_base_id: str = "default",
+    retrieval_mode: str | None = None,
+):
     if not question or not question.strip():
         raise ValueError("问题不能为空。")
     knowledge_base_id = _normalized_knowledge_base_id(knowledge_base_id)
@@ -309,15 +383,43 @@ def retrieve_docs(question: str, k: int = 4, knowledge_base_id: str = "default")
         raise ValueError(EMPTY_KNOWLEDGE_BASE_MESSAGE)
 
     index = _knowledge_bases[knowledge_base_id]
-    query_vector = index.vectorizer.transform([question.strip()])
-    similarities = cosine_similarity(query_vector, index.tfidf_matrix).ravel()
-    result_count = min(k, len(index.documents))
-    ranked_indices = similarities.argsort()[::-1][:result_count]
-
-    return [
-        (index.documents[item_index], float(1.0 - similarities[item_index]))
-        for item_index in ranked_indices
-    ]
+    analysis = analyze_query(question, index.documents)
+    documents, filter_applied = filter_documents(index.documents, analysis)
+    if analysis.error_code and not filter_applied:
+        return RetrievalResult([])
+    if documents is not index.documents:
+        filtered_index = _fit_index(documents)
+    else:
+        filtered_index = index
+    mode = get_retrieval_mode(retrieval_mode)
+    lexical = _lexical_candidates(
+        filtered_index,
+        question,
+        documents,
+        analysis,
+        _positive_int("LEXICAL_TOP_K", DEFAULT_LEXICAL_TOP_K),
+    )
+    vector = _tfidf_candidates(
+        filtered_index,
+        question,
+        documents,
+        analysis,
+        _positive_int("VECTOR_TOP_K", DEFAULT_VECTOR_TOP_K),
+    )
+    if mode == "lexical":
+        candidates = lexical[:k]
+    elif mode == "vector":
+        candidates = vector[:k]
+    else:
+        candidates = rrf_fuse(
+            lexical,
+            vector,
+            rrf_k=_positive_int("RRF_K", DEFAULT_RRF_K),
+            top_k=min(k, _positive_int("HYBRID_TOP_K", DEFAULT_HYBRID_TOP_K)),
+        )
+    for rank, candidate in enumerate(candidates, start=1):
+        candidate.final_rank = rank
+    return RetrievalResult(candidates)
 
 
 def has_relevant_docs(scored_docs):
@@ -339,6 +441,23 @@ def get_relevance_threshold() -> float:
 
 
 def filter_relevant_docs(scored_docs):
+    candidates = getattr(scored_docs, "candidates", None)
+    if candidates is not None:
+        relevant = [
+            candidate
+            for candidate in candidates
+            if candidate.exact_metadata_match
+            or (
+                candidate.vector_score is not None
+                and candidate.evidence_score <= get_relevance_threshold()
+            )
+            or (
+                candidate.vector_score is None
+                and candidate.lexical_score is not None
+                and candidate.lexical_score > 0
+            )
+        ]
+        return RetrievalResult(relevant)
     threshold = get_relevance_threshold()
     return [
         (document, score)

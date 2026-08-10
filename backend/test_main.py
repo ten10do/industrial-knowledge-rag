@@ -1065,6 +1065,16 @@ class FastApiBackendTests(unittest.TestCase):
         self.assertTrue(response.json()["is_refused"])
         generate.assert_not_called()
 
+    def test_ask_rejects_unknown_retrieval_mode(self):
+        response = self.client.post(
+            "/ask",
+            json={
+                "question": "PLC 扫描周期是什么？",
+                "retrieval_mode": "invalid",
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+
     def test_study_endpoints_use_expected_task_types(self):
         cases = [
             ("/study/summary", "summary"),

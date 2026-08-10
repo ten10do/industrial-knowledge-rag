@@ -96,6 +96,7 @@ export async function askQuestion({
   conversationId,
   history,
   contextOptions,
+  retrievalMode,
 }) {
   const payload = {
     question,
@@ -105,6 +106,7 @@ export async function askQuestion({
   if (conversationId) payload.conversation_id = conversationId
   if (Array.isArray(history)) payload.history = history
   if (contextOptions) payload.context_options = contextOptions
+  if (retrievalMode) payload.retrieval_mode = retrievalMode
 
   const response = await apiClient.post(
     '/ask',

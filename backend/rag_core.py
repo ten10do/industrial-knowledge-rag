@@ -15,10 +15,16 @@ if __package__:
     from .ingestion import PageText, ingest_pages
     from .learning_content import generate_hierarchical_learning_content
     from .llm_client import generate_llm_answer
+    from .retrieval import RetrievalCandidate, RetrievalResult, analyze_query, filter_documents, rrf_fuse
+    from .retrieval.bm25 import BM25Index
+    from .retrieval.filters import has_exact_metadata_match
 else:
     from ingestion import PageText, ingest_pages
     from learning_content import generate_hierarchical_learning_content
     from llm_client import generate_llm_answer
+    from retrieval import RetrievalCandidate, RetrievalResult, analyze_query, filter_documents, rrf_fuse
+    from retrieval.bm25 import BM25Index
+    from retrieval.filters import has_exact_metadata_match
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -31,6 +37,11 @@ EMPTY_KNOWLEDGE_BASE_MESSAGE = "请先上传 PDF 并构建知识库。"
 # Chroma 在当前 Embedding 配置下返回原始距离值，数值越小表示越相关。
 MAX_RELEVANT_DISTANCE = 20.0
 DEFAULT_MAX_KNOWLEDGE_BASE_CHUNKS = 240
+DEFAULT_RETRIEVAL_MODE = "hybrid"
+DEFAULT_LEXICAL_TOP_K = 10
+DEFAULT_VECTOR_TOP_K = 10
+DEFAULT_HYBRID_TOP_K = 5
+DEFAULT_RRF_K = 60
 
 
 def load_pdf(file_path: str | os.PathLike):
@@ -176,6 +187,13 @@ def load_vector_db(knowledge_base_id: str = "default"):
         persist_directory=str(persist_dir),
         embedding_function=get_embedding_model()
     )
+
+
+def load_lexical_db(knowledge_base_id: str = "default"):
+    persist_dir = get_persist_dir(knowledge_base_id)
+    if not persist_dir.exists():
+        raise ValueError(EMPTY_KNOWLEDGE_BASE_MESSAGE)
+    return Chroma(persist_directory=str(persist_dir), embedding_function=None)
 
 
 def is_knowledge_base_ready(knowledge_base_id: str = "default"):
@@ -392,12 +410,106 @@ def build_knowledge_base(pdf_paths, knowledge_base_id: str = "default"):
     return page_count, chunk_count
 
 
-def retrieve_docs(question: str, k: int = 4, knowledge_base_id: str = "default"):
+def _positive_int(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def get_retrieval_mode(mode: str | None = None) -> str:
+    selected = (mode or os.getenv("RETRIEVAL_MODE", DEFAULT_RETRIEVAL_MODE)).lower()
+    aliases = {"bm25": "lexical", "tfidf": "vector"}
+    selected = aliases.get(selected, selected)
+    if selected not in {"lexical", "vector", "hybrid"}:
+        raise ValueError("RETRIEVAL_MODE must be lexical, vector, or hybrid.")
+    return selected
+
+
+def _all_documents(knowledge_base_id: str):
+    result = load_lexical_db(knowledge_base_id).get(include=["documents", "metadatas"])
+    documents = result.get("documents", [])
+    metadatas = result.get("metadatas", [])
+    return [
+        SimpleNamespace(
+            page_content=content,
+            metadata=(metadatas[index] if index < len(metadatas) else {}) or {},
+        )
+        for index, content in enumerate(documents)
+        if content and content.strip()
+    ]
+
+
+def _lexical_candidates(question: str, documents: list, analysis, top_k: int):
+    scores = BM25Index([document.page_content for document in documents]).score(question)
+    ranked = sorted(
+        range(len(documents)),
+        key=lambda item: (-scores[item], str(documents[item].metadata.get("chunk_id", ""))),
+    )[: min(top_k, len(documents))]
+    return [
+        RetrievalCandidate(
+            document=documents[item], retrieval_source="lexical", lexical_rank=rank,
+            lexical_score=float(scores[item]), evidence_score=0.0 if scores[item] > 0 else 1.0,
+            exact_metadata_match=has_exact_metadata_match(documents[item], analysis),
+        )
+        for rank, item in enumerate(ranked, start=1) if scores[item] > 0
+    ]
+
+
+def _vector_candidates(question: str, knowledge_base_id: str, analysis, top_k: int):
+    results = load_vector_db(knowledge_base_id).similarity_search_with_score(question, k=top_k)
+    return [
+        RetrievalCandidate(
+            document=document, retrieval_source="vector", vector_rank=rank,
+            vector_score=float(score), evidence_score=float(score),
+            exact_metadata_match=has_exact_metadata_match(document, analysis),
+        )
+        for rank, (document, score) in enumerate(results, start=1)
+    ]
+
+
+def retrieve_docs(
+    question: str,
+    k: int = 4,
+    knowledge_base_id: str = "default",
+    retrieval_mode: str | None = None,
+):
     if not question or not question.strip():
         raise ValueError("问题不能为空。")
-
-    vector_db = load_vector_db(knowledge_base_id)
-    return vector_db.similarity_search_with_score(question, k=k)
+    documents = _all_documents(knowledge_base_id)
+    analysis = analyze_query(question, documents)
+    documents, filter_applied = filter_documents(documents, analysis)
+    if analysis.error_code and not filter_applied:
+        return RetrievalResult([])
+    lexical = _lexical_candidates(
+        question, documents, analysis, _positive_int("LEXICAL_TOP_K", DEFAULT_LEXICAL_TOP_K)
+    )
+    mode = get_retrieval_mode(retrieval_mode)
+    if mode == "lexical":
+        candidates = lexical[:k]
+    else:
+        try:
+            vector = _vector_candidates(
+                question, knowledge_base_id, analysis,
+                _positive_int("VECTOR_TOP_K", DEFAULT_VECTOR_TOP_K),
+            )
+        except Exception:
+            if mode == "vector":
+                raise
+            vector = []
+        candidates = (
+            vector[:k]
+            if mode == "vector"
+            else rrf_fuse(
+                lexical, vector,
+                rrf_k=_positive_int("RRF_K", DEFAULT_RRF_K),
+                top_k=min(k, _positive_int("HYBRID_TOP_K", DEFAULT_HYBRID_TOP_K)),
+            )
+        )
+    for rank, candidate in enumerate(candidates, start=1):
+        candidate.final_rank = rank
+    return RetrievalResult(candidates)
 
 
 def has_relevant_docs(scored_docs):
@@ -420,6 +532,21 @@ def get_relevance_threshold() -> float:
 
 
 def filter_relevant_docs(scored_docs):
+    candidates = getattr(scored_docs, "candidates", None)
+    if candidates is not None:
+        return RetrievalResult([
+            candidate for candidate in candidates
+            if candidate.exact_metadata_match
+            or (
+                candidate.vector_score is not None
+                and candidate.evidence_score <= get_relevance_threshold()
+            )
+            or (
+                candidate.vector_score is None
+                and candidate.lexical_score is not None
+                and candidate.lexical_score > 0
+            )
+        ])
     threshold = get_relevance_threshold()
     return [
         (document, score)
@@ -429,24 +556,7 @@ def filter_relevant_docs(scored_docs):
 
 
 def get_all_docs(knowledge_base_id: str = "default"):
-    vector_db = load_vector_db(knowledge_base_id)
-    result = vector_db.get(
-        include=["documents", "metadatas"],
-    )
-
-    documents = result.get("documents", [])
-    metadatas = result.get("metadatas", [])
-    representative_docs = []
-
-    for index, content in enumerate(documents):
-        if not content or not content.strip():
-            continue
-
-        metadata = metadatas[index] if index < len(metadatas) and metadatas[index] else {}
-        doc = SimpleNamespace(page_content=content, metadata=metadata)
-        representative_docs.append((doc, 0.0))
-
-    return representative_docs
+    return [(document, 0.0) for document in _all_documents(knowledge_base_id)]
 
 
 def get_representative_docs(k: int = 8, knowledge_base_id: str = "default"):
