@@ -6,6 +6,11 @@ import pytest
 
 from backend.evaluation.benchmark_runner import CHALLENGE_PATH, run_dataset
 from backend.evaluation.benchmark_schema import FAILURE_TYPES, classify_failure, evaluate_rows, load_manifest
+from backend.evaluation.private_benchmark import (
+    _resolve_local_file,
+    annotation_hash,
+    load_private_manifest,
+)
 
 
 def test_challenge_manifest_has_required_coverage():
@@ -76,6 +81,51 @@ def test_private_dataset_is_optional_and_ignored():
     assert "backend/evaluation/benchmark_private/" in (
         CHALLENGE_PATH.parents[3] / ".gitignore"
     ).read_text(encoding="utf-8")
+
+
+def _private_manifest():
+    return {
+        "name": "local-private-test",
+        "documents": [{
+            "document_id": "doc-a", "file": "documents/manual.pdf",
+            "source_name": "Vendor Manual", "source_type": "official_vendor_publication",
+            "manufacturer": "Vendor", "equipment_type": "drive", "equipment_model": "Drive-A",
+            "document_type": "operating_manual", "language": "en", "version": "1.0",
+            "publish_date": "2025-01", "commit_allowed": False,
+        }],
+        "queries": [{
+            "query_id": "q1", "query": "How do I start Drive-A?", "category": "procedure",
+            "answerable": True, "relevant_chunk_ids": ["chunk-a"],
+            "relevant_document_ids": ["doc-a"], "expected_model": "Drive-A",
+            "expected_error_code": "", "expected_section": "Commissioning", "difficulty": "medium",
+        }],
+    }
+
+
+def test_private_manifest_enforces_local_only_metadata_and_freeze_hash(tmp_path):
+    manifest = _private_manifest()
+    manifest["freeze"] = {"annotation_sha256": annotation_hash(manifest)}
+    path = tmp_path / "manifest.json"
+    path.write_text(__import__("json").dumps(manifest), encoding="utf-8")
+    assert load_private_manifest(path)["freeze"]["annotation_sha256"] == annotation_hash(manifest)
+
+    manifest["documents"][0]["commit_allowed"] = True
+    path.write_text(__import__("json").dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="commit_allowed=false"):
+        load_private_manifest(path)
+
+
+def test_private_manifest_rejects_missing_files_and_stale_freeze_hash(tmp_path):
+    manifest = _private_manifest()
+    path = tmp_path / "manifest.json"
+    path.write_text(__import__("json").dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="unavailable"):
+        _resolve_local_file(path, "documents/manual.pdf")
+
+    manifest["freeze"] = {"annotation_sha256": "stale"}
+    path.write_text(__import__("json").dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="hash"):
+        load_private_manifest(path)
 
 
 def test_synthetic_runner_is_deterministic():

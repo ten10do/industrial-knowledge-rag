@@ -132,10 +132,11 @@ def run_dataset(dataset: str, modes: tuple[str, ...] = MODES) -> dict:
                 "status": "REAL_CORPUS_GATE_NOT_RUN",
                 "reason": "No local ignored manifest at backend/evaluation/benchmark_private/manifest.json.",
             }
-        manifest = load_manifest(PRIVATE_PATH)
-        if any(document["commit_allowed"] for document in manifest["documents"]):
-            raise ValueError("Private corpus documents must set commit_allowed to false.")
-        return run_manifest_benchmark(PRIVATE_PATH, modes)
+        from backend.evaluation.private_benchmark import run_private_benchmark
+
+        if modes != MODES:
+            raise ValueError("Private real-corpus validation must run every frozen pipeline.")
+        return run_private_benchmark(PRIVATE_PATH)
     synthetic = run_benchmark()
     requested = {"tfidf": "legacy_tfidf", "bm25": "bm25", "hybrid": "hybrid"}
     return {

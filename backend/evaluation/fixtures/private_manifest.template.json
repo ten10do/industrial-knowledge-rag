@@ -1,0 +1,37 @@
+{
+  "name": "private-real-corpus-local-only",
+  "freeze": {
+    "timestamp": "YYYY-MM-DDTHH:MM:SSZ",
+    "annotation_sha256": "replace-with-the-output-of-annotation_hash"
+  },
+  "documents": [
+    {
+      "document_id": "siemens-g120c-2023",
+      "file": "documents/g120c_operating_instructions.pdf",
+      "source_name": "SINAMICS G120C Operating Instructions",
+      "source_type": "official_vendor_publication",
+      "manufacturer": "Siemens",
+      "equipment_type": "drive",
+      "equipment_model": "G120C",
+      "document_type": "operating_manual",
+      "language": "en",
+      "version": "02/2023",
+      "publish_date": "2023-02",
+      "commit_allowed": false
+    }
+  ],
+  "queries": [
+    {
+      "query_id": "q01",
+      "query": "Write a user-oriented query after reviewing the parsed chunks.",
+      "category": "procedure",
+      "answerable": true,
+      "relevant_chunk_ids": ["replace-after-parser-audit"],
+      "relevant_document_ids": ["siemens-g120c-2023"],
+      "expected_model": "G120C",
+      "expected_error_code": "",
+      "expected_section": "",
+      "difficulty": "medium"
+    }
+  ]
+}
