@@ -1,0 +1,6 @@
+-r requirements.txt
+langchain
+langchain-community
+langchain-chroma
+chromadb
+sentence-transformers

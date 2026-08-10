@@ -1,0 +1,382 @@
+{
+  "documents": [
+    {
+      "source": "feedback_control_basics.pdf",
+      "title": "反馈控制基础",
+      "keywords": ["反馈控制", "偏差", "负反馈", "稳态误差"],
+      "pages": [
+        "反馈控制系统把输出测量值送回比较环节，与给定值比较形成偏差。控制器根据偏差产生控制作用，使被控量跟踪目标。闭环结构通常由给定环节、比较环节、控制器、执行器、被控对象和测量反馈环节组成。",
+        "负反馈会抵消输出偏离目标的趋势，能够抑制扰动并减小参数变化对系统性能的影响。合理提高环路增益通常可以减小稳态误差，但过高增益可能削弱稳定裕度，因此设计时需要兼顾精度与稳定性。"
+      ]
+    },
+    {
+      "source": "time_domain_stability.pdf",
+      "title": "时域响应与稳定性",
+      "keywords": ["阶跃响应", "超调量", "调节时间", "闭环极点"],
+      "pages": [
+        "阶跃响应的常用时域指标包括上升时间、峰值时间、调节时间和超调量。超调量描述响应峰值超过稳态值的程度，调节时间表示响应进入并保持在允许误差带内所需的时间。",
+        "连续线性闭环系统的稳定性由闭环极点位置决定。全部闭环极点位于复平面左半平面时系统渐近稳定。主导极点的阻尼比影响振荡和超调，阻尼比增大通常会降低超调，但响应速度也可能改变。"
+      ]
+    },
+    {
+      "source": "frequency_response.pdf",
+      "title": "频率响应分析",
+      "keywords": ["伯德图", "频率响应", "相位裕度", "增益裕度"],
+      "pages": [
+        "频率响应描述正弦输入频率变化时系统稳态输出的幅值比和相位差。伯德图由对数频率坐标下的幅频曲线与相频曲线组成，可用于观察截止频率、带宽以及不同频段的动态特性。",
+        "增益裕度和相位裕度是频域稳定裕度指标。相位裕度在增益交叉频率处衡量距离临界不稳定还剩多少相位余量；正且足够的稳定裕度通常意味着系统对模型误差更鲁棒。奈奎斯特判据也能依据开环频率特性判断闭环稳定性。"
+      ]
+    },
+    {
+      "source": "pid_control.pdf",
+      "title": "PID 控制器",
+      "keywords": ["比例", "积分", "微分", "积分饱和"],
+      "pages": [
+        "PID 控制器由比例、积分和微分三个环节组成。比例作用对当前偏差快速响应；积分作用累积历史偏差，可以消除恒值扰动造成的稳态误差；微分作用反映偏差变化趋势，可增加阻尼并改善瞬态响应。",
+        "执行器饱和时，积分项仍持续累积会产生积分饱和，导致退出饱和后恢复缓慢和较大超调。抗积分饱和可采用积分限幅或反计算方法。实际微分环节常加入低通滤波，以降低测量噪声被放大的风险。"
+      ]
+    },
+    {
+      "source": "plc_scan_cycle.pdf",
+      "title": "PLC 扫描周期",
+      "keywords": ["PLC", "扫描周期", "输入采样", "程序执行", "输出刷新", "输入响应"],
+      "pages": [
+        "PLC 扫描周期通常依次包括输入采样、用户程序执行和输出刷新。输入采样阶段读取现场输入并写入输入映像区，程序执行阶段使用映像区数据运算，输出刷新阶段把输出映像区结果送往输出模块。",
+        "PLC 对输入信号的响应速度受扫描周期影响。输入信号若刚好错过输入采样，通常要等到下一扫描周期才能被读取；程序执行时间增长也会延长扫描周期和输入响应时间。高速信号可使用高速计数或中断功能。"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "feedback-error",
+      "category": "single-document",
+      "question": "反馈控制系统如何由给定值和输出测量值形成控制器使用的偏差？",
+      "expected_sources": ["feedback_control_basics.pdf"],
+      "expected_keywords": ["输出测量值", "比较", "偏差"],
+      "should_refuse": false
+    },
+    {
+      "id": "feedback-disturbance",
+      "category": "single-document",
+      "question": "负反馈为什么能够抑制扰动并减小稳态误差？",
+      "expected_sources": ["feedback_control_basics.pdf"],
+      "expected_keywords": ["负反馈", "抑制扰动", "稳态误差"],
+      "should_refuse": false
+    },
+    {
+      "id": "time-overshoot",
+      "category": "single-document",
+      "question": "阶跃响应中的超调量和调节时间分别表示什么？",
+      "expected_sources": ["time_domain_stability.pdf"],
+      "expected_keywords": ["超调量", "调节时间", "误差带"],
+      "should_refuse": false
+    },
+    {
+      "id": "time-poles",
+      "category": "single-document",
+      "question": "连续线性闭环系统的极点位于哪里时渐近稳定？",
+      "expected_sources": ["time_domain_stability.pdf"],
+      "expected_keywords": ["闭环极点", "左半平面", "渐近稳定"],
+      "should_refuse": false
+    },
+    {
+      "id": "frequency-bode",
+      "category": "single-document",
+      "question": "伯德图的幅频曲线和相频曲线可以用来观察哪些频率响应特性？",
+      "expected_sources": ["frequency_response.pdf"],
+      "expected_keywords": ["伯德图", "幅频曲线", "相频曲线"],
+      "should_refuse": false
+    },
+    {
+      "id": "frequency-margin",
+      "category": "single-document",
+      "question": "相位裕度在什么频率处衡量系统距离临界不稳定的余量？",
+      "expected_sources": ["frequency_response.pdf"],
+      "expected_keywords": ["相位裕度", "增益交叉频率", "临界不稳定"],
+      "should_refuse": false
+    },
+    {
+      "id": "pid-roles",
+      "category": "single-document",
+      "question": "PID 控制器的比例、积分和微分作用各自负责什么？",
+      "expected_sources": ["pid_control.pdf"],
+      "expected_keywords": ["比例", "积分", "微分"],
+      "should_refuse": false
+    },
+    {
+      "id": "pid-windup",
+      "category": "single-document",
+      "question": "什么是积分饱和，可以采用哪些抗积分饱和方法？",
+      "expected_sources": ["pid_control.pdf"],
+      "expected_keywords": ["积分饱和", "积分限幅", "反计算"],
+      "should_refuse": false
+    },
+    {
+      "id": "hard-paraphrase-loop-gain",
+      "category": "hard-paraphrase",
+      "question": "为了提高控制精度，环路增益是否可以一直增大而不用考虑别的问题？",
+      "expected_sources": ["feedback_control_basics.pdf"],
+      "expected_keywords": ["环路增益", "稳态误差", "稳定裕度"],
+      "should_refuse": false
+    },
+    {
+      "id": "cross-time-frequency",
+      "category": "cross-document",
+      "question": "请同时从阶跃响应超调量和频域相位裕度两个角度说明控制系统的动态性能与稳定裕度。",
+      "expected_sources": [
+        "time_domain_stability.pdf",
+        "frequency_response.pdf"
+      ],
+      "expected_keywords": ["超调量", "相位裕度"],
+      "should_refuse": false
+    },
+    {
+      "id": "cross-feedback-pid",
+      "category": "cross-document",
+      "question": "负反馈减小稳态误差的原理与 PID 积分作用消除稳态误差有什么联系？",
+      "expected_sources": [
+        "feedback_control_basics.pdf",
+        "pid_control.pdf"
+      ],
+      "expected_keywords": ["负反馈", "积分作用", "稳态误差"],
+      "should_refuse": false
+    },
+    {
+      "id": "out-of-scope-capital",
+      "category": "out-of-scope",
+      "question": "法国的首都是哪座城市？",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "should_refuse": true
+    },
+    {
+      "id": "out-of-scope-penguin",
+      "category": "out-of-scope",
+      "question": "企鹅的自然栖息地和迁徙方式是什么？",
+      "expected_sources": [],
+      "expected_keywords": [],
+      "should_refuse": true
+    }
+  ],
+  "multi_turn_cases": [
+    {
+      "id": "multiturn-pid-integral",
+      "first_question": "PID 控制器由哪些环节组成？",
+      "first_answer": "PID 控制器由比例、积分和微分环节组成。",
+      "follow_up": "其中积分项有什么作用？",
+      "standalone_query": "PID 控制器中的积分项有什么作用？",
+      "required_query_terms": ["PID", "积分项"],
+      "expected_sources": ["pid_control.pdf"],
+      "expected_keywords": ["积分作用", "稳态误差"]
+    },
+    {
+      "id": "multiturn-plc-input-response",
+      "first_question": "PLC 扫描周期包括哪些阶段？",
+      "first_answer": "包括输入采样、程序执行和输出刷新。",
+      "follow_up": "它对输入响应有什么影响？",
+      "standalone_query": "PLC 扫描周期对输入响应有什么影响？",
+      "required_query_terms": ["PLC", "扫描周期", "输入响应"],
+      "expected_sources": ["plc_scan_cycle.pdf"],
+      "expected_keywords": ["扫描周期", "输入响应"]
+    }
+  ],
+  "fallback_cases": [
+    {
+      "id": "lexical-other",
+      "category": "lexical-boundary",
+      "history": [{"role": "user", "content": "什么是 PID 控制？"}],
+      "question": "其他控制方法有哪些？",
+      "expected_standalone_query": "其他控制方法有哪些？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "lexical-other-possessive",
+      "category": "lexical-boundary",
+      "history": [{"role": "user", "content": "什么是 PID 控制？"}],
+      "question": "其他的控制方式有哪些？",
+      "expected_standalone_query": "其他的控制方式有哪些？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "lexical-next",
+      "category": "lexical-boundary",
+      "history": [{"role": "user", "content": "什么是 PID 控制？"}],
+      "question": "其次还需要考虑哪些因素？",
+      "expected_standalone_query": "其次还需要考虑哪些因素？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "lexical-actually",
+      "category": "lexical-boundary",
+      "history": [{"role": "user", "content": "什么是 PID 控制？"}],
+      "question": "其实这种方法有什么限制？",
+      "expected_standalone_query": "其实这种方法有什么限制？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "lexical-remainder",
+      "category": "lexical-boundary",
+      "history": [{"role": "user", "content": "什么是 PID 控制？"}],
+      "question": "其余参数如何设置？",
+      "expected_standalone_query": "其余参数如何设置？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "lexical-during",
+      "category": "lexical-boundary",
+      "history": [{"role": "user", "content": "什么是 PID 控制？"}],
+      "question": "其间发生了哪些状态变化？",
+      "expected_standalone_query": "其间发生了哪些状态变化？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "lexical-other-comparison",
+      "category": "lexical-boundary",
+      "history": [{"role": "user", "content": "什么是 PID 控制？"}],
+      "question": "其他控制方法与 PID 控制相比有哪些区别？",
+      "expected_standalone_query": "其他控制方法与 PID 控制相比有哪些区别？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "lexical-unknown-term",
+      "category": "lexical-boundary",
+      "history": [{"role": "user", "content": "什么是 PID 控制？"}],
+      "question": "其他阿尔法结构有哪些？",
+      "expected_standalone_query": "其他阿尔法结构有哪些？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "lexical-currently",
+      "category": "lexical-boundary",
+      "history": [{"role": "user", "content": "什么是 PID 控制？"}],
+      "question": "目前常用的控制方法有哪些？",
+      "expected_standalone_query": "目前常用的控制方法有哪些？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "fallback-qi-effect",
+      "category": "deterministic-fallback",
+      "history": [{"role": "user", "content": "什么是 PID 控制？"}],
+      "question": "其作用是什么？",
+      "expected_standalone_query": "PID 控制器的作用是什么？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "fallback-qi-impact",
+      "category": "deterministic-fallback",
+      "history": [{"role": "user", "content": "PLC 扫描周期包括哪些阶段？"}],
+      "question": "其影响主要体现在哪些方面？",
+      "expected_standalone_query": "PLC 扫描周期的影响主要体现在哪些方面？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "fallback-unknown-principle",
+      "category": "deterministic-fallback",
+      "history": [{"role": "user", "content": "什么是矢量控制？"}],
+      "question": "其原理与标量控制有什么区别？",
+      "expected_standalone_query": "矢量控制的原理与标量控制有什么区别？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "fallback-qizhong",
+      "category": "deterministic-fallback",
+      "history": [{"role": "user", "content": "什么是 PID 控制？"}],
+      "question": "其中积分项有什么作用？",
+      "expected_standalone_query": "PID 控制器中的积分项有什么作用？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "fallback-ta",
+      "category": "deterministic-fallback",
+      "history": [{"role": "user", "content": "什么是闭环控制？"}],
+      "question": "它为什么能提高抗扰能力？",
+      "expected_standalone_query": "闭环控制为什么能提高抗扰能力？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "fallback-gai-segment",
+      "category": "deterministic-fallback",
+      "history": [{"role": "user", "content": "什么是电感式接近开关？"}],
+      "question": "该环节为什么受到金属目标影响？",
+      "expected_standalone_query": "电感式接近开关为什么受到金属目标影响？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "fallback-explicit-subtopic-no-assistant-echo",
+      "category": "deterministic-fallback",
+      "history": [
+        {"role": "user", "content": "闭环控制是什么？"},
+        {"role": "assistant", "content": "闭环控制通过测量输出修正偏差。"},
+        {"role": "user", "content": "反馈环节有什么作用？"},
+        {"role": "assistant", "content": "反馈环节用于比较输出和设定值。"}
+      ],
+      "question": "它为什么影响稳定性？",
+      "expected_standalone_query": "闭环控制的反馈环节为什么影响稳定性？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "fallback-cascade-chain",
+      "category": "deterministic-fallback",
+      "history": [
+        {"role": "user", "content": "串级控制包括哪些环节？"},
+        {"role": "assistant", "content": "串级控制包含主回路和副回路。"},
+        {"role": "user", "content": "其中副回路有什么作用？"},
+        {"role": "assistant", "content": "副回路用于快速抑制内环扰动。"}
+      ],
+      "question": "它如何提高抗扰能力？",
+      "expected_standalone_query": "串级控制的副回路如何提高抗扰能力？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "fallback-empty-history",
+      "category": "deterministic-fallback",
+      "history": [],
+      "question": "其作用是什么？",
+      "expected_standalone_query": "其作用是什么？",
+      "expected_status": "not_needed",
+      "expected_fallback_used": false
+    },
+    {
+      "id": "fallback-ambiguous-topics",
+      "category": "deterministic-fallback",
+      "history": [
+        {"role": "user", "content": "PID 控制有什么特点？"},
+        {"role": "assistant", "content": "PID 控制结合比例、积分和微分作用。"},
+        {"role": "user", "content": "PLC 扫描周期包括哪些阶段？"},
+        {"role": "assistant", "content": "包括输入采样、程序执行和输出刷新。"},
+        {"role": "user", "content": "变频器有哪些作用？"},
+        {"role": "assistant", "content": "变频器可以调节电机转速。"}
+      ],
+      "question": "其作用是什么？",
+      "expected_standalone_query": "其作用是什么？",
+      "expected_status": "unresolved",
+      "expected_fallback_used": true
+    },
+    {
+      "id": "fallback-complete-question",
+      "category": "deterministic-fallback",
+      "history": [{"role": "user", "content": "什么是 PID 控制？"}],
+      "question": "PID 控制器的积分项为什么会饱和？",
+      "expected_standalone_query": "PID 控制器的积分项为什么会饱和？",
+      "expected_status": "fallback",
+      "expected_fallback_used": true
+    }
+  ]
+}

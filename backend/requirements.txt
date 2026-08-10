@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+python-multipart
+pypdf
+python-dotenv
+scikit-learn
+numpy
+groq
+openai
+boto3
+redis
+rq

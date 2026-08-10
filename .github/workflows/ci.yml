@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend Tests and Offline RAG Evaluation
+    runs-on: ubuntu-latest
+    env:
+      RAG_MODE: light
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.txt
+          python -m pip install pytest httpx
+
+      - name: Check Python syntax
+        run: python -m compileall -q backend
+
+      - name: Run backend tests
+        run: python -m pytest backend -v
+
+      - name: Run offline RAG evaluation
+        run: python -m backend.evaluation.run
+
+  full-backend-smoke:
+    name: Full RAG Dependency and Import Smoke Test
+    runs-on: ubuntu-latest
+    env:
+      RAG_MODE: full
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements-full.txt
+
+      - name: Install full backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements-full.txt
+
+      - name: Import full backend
+        run: |
+          python -c "from backend.main import app; from backend import rag_core; assert app and rag_core.get_persist_dir('kb-ci-smoke-00000001')"
+
+  frontend:
+    name: Frontend Tests and Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm run test
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
