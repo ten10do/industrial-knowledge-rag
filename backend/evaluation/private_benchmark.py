@@ -151,6 +151,8 @@ def _candidate_rows(candidates: list) -> list[dict]:
         "rank": rank,
         "chunk_id": candidate.chunk_id,
         "document_id": candidate.metadata.get("document_id", ""),
+        "source": candidate.metadata.get("source", ""),
+        "page": candidate.metadata.get("page"),
         "section": candidate.metadata.get("section", ""),
         "equipment_model": candidate.metadata.get("equipment_model", ""),
         "error_code": candidate.metadata.get("error_code", ""),
@@ -230,6 +232,7 @@ def _run_mode(mode: str, queries: list[dict], light_rag, light_id, reranker) -> 
         if outcome:
             rerank_rows.append({
                 "query_id": query["query_id"], "before_rank": before_rank, "after_rank": rank,
+                "answerable": query["answerable"],
                 "candidate_missing": before_rank is None,
             })
         rows.append({
@@ -241,21 +244,26 @@ def _run_mode(mode: str, queries: list[dict], light_rag, light_id, reranker) -> 
     report["latency_ms_median"] = statistics.median(latencies)
     report["latency_ms_p95"] = sorted(latencies)[max(0, round(len(latencies) * .95) - 1)]
     if rerank_rows:
-        comparable = [item for item in rerank_rows if not item["candidate_missing"]]
-        improved = sum(item["after_rank"] and item["after_rank"] < item["before_rank"] for item in comparable)
-        degraded = sum(item["after_rank"] is None or item["after_rank"] > item["before_rank"] for item in comparable)
-        same = len(comparable) - improved - degraded
-        deltas = [item["before_rank"] - item["after_rank"] for item in comparable if item["after_rank"]]
-        report["rerank_analysis"] = {
-            "improved": improved, "same": same, "degraded": degraded,
-            "candidate_missing": len(rerank_rows) - len(comparable),
-            "win_rate": improved / len(comparable) if comparable else 0.0,
-            "tie_rate": same / len(comparable) if comparable else 0.0,
-            "loss_rate": degraded / len(comparable) if comparable else 0.0,
-            "mean_rank_delta": statistics.mean(deltas) if deltas else 0.0,
-            "rows": rerank_rows,
-        }
+        report["rerank_analysis"] = _rerank_analysis(rerank_rows)
     return report
+
+
+def _rerank_analysis(rows: list[dict]) -> dict:
+    answerable_rows = [item for item in rows if item.get("answerable", True)]
+    comparable = [item for item in answerable_rows if not item["candidate_missing"]]
+    improved = sum(bool(item["after_rank"] and item["after_rank"] < item["before_rank"]) for item in comparable)
+    degraded = sum(item["after_rank"] is None or item["after_rank"] > item["before_rank"] for item in comparable)
+    same = len(comparable) - improved - degraded
+    deltas = [item["before_rank"] - item["after_rank"] for item in comparable if item["after_rank"]]
+    return {
+        "improved": improved, "same": same, "degraded": degraded,
+        "candidate_missing": len(answerable_rows) - len(comparable),
+        "win_rate": improved / len(comparable) if comparable else 0.0,
+        "tie_rate": same / len(comparable) if comparable else 0.0,
+        "loss_rate": degraded / len(comparable) if comparable else 0.0,
+        "mean_rank_delta": statistics.mean(deltas) if deltas else 0.0,
+        "rows": rows,
+    }
 
 
 def _evidence_report(queries: list[dict], documents: list[Document]) -> dict:

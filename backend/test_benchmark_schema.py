@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 
+from backend.evaluation import benchmark_runner
 from backend.evaluation.benchmark_runner import CHALLENGE_PATH, run_dataset
 from backend.evaluation.benchmark_schema import FAILURE_TYPES, classify_failure, evaluate_rows, load_manifest
 from backend.evaluation.private_benchmark import (
+    _candidate_rows,
     _resolve_local_file,
+    _rerank_analysis,
     annotation_hash,
     load_private_manifest,
 )
@@ -75,7 +79,8 @@ def test_specific_confusion_is_mutually_exclusive_with_generic_recall_failure():
     assert classify_failure(query, row) == "MODEL_CONFUSION"
 
 
-def test_private_dataset_is_optional_and_ignored():
+def test_private_dataset_is_optional_and_ignored(tmp_path, monkeypatch):
+    monkeypatch.setattr(benchmark_runner, "PRIVATE_PATH", tmp_path / "missing-manifest.json")
     report = run_dataset("private")
     assert report["status"] == "REAL_CORPUS_GATE_NOT_RUN"
     assert "backend/evaluation/benchmark_private/" in (
@@ -126,6 +131,34 @@ def test_private_manifest_rejects_missing_files_and_stale_freeze_hash(tmp_path):
     path.write_text(__import__("json").dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError, match="hash"):
         load_private_manifest(path)
+
+
+def test_private_rerank_analysis_handles_a_relevant_chunk_dropped_by_final_top_k():
+    report = _rerank_analysis([
+        {"query_id": "drop", "answerable": True, "before_rank": 4, "after_rank": None, "candidate_missing": False},
+        {"query_id": "same", "answerable": True, "before_rank": 1, "after_rank": 1, "candidate_missing": False},
+        {"query_id": "missing", "answerable": True, "before_rank": None, "after_rank": None, "candidate_missing": True},
+        {"query_id": "ood", "answerable": False, "before_rank": None, "after_rank": None, "candidate_missing": True},
+    ])
+    assert report["degraded"] == 1
+    assert report["same"] == 1
+    assert report["candidate_missing"] == 1
+
+
+def test_private_candidate_rows_include_citation_metadata():
+    candidate = SimpleNamespace(
+        chunk_id="chunk-a",
+        metadata={"document_id": "doc-a", "source": "Vendor Manual", "page": 12, "section": "Setup"},
+        vector_score=0.1,
+        lexical_score=0.2,
+        pre_rerank_rank=1,
+        rerank_rank=1,
+    )
+    assert _candidate_rows([candidate])[0] == {
+        "rank": 1, "chunk_id": "chunk-a", "document_id": "doc-a", "source": "Vendor Manual",
+        "page": 12, "section": "Setup", "equipment_model": "", "error_code": "",
+        "vector_distance": 0.1, "lexical_score": 0.2, "pre_rerank_rank": 1, "rerank_rank": 1,
+    }
 
 
 def test_synthetic_runner_is_deterministic():

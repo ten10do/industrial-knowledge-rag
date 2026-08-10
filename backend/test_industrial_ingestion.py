@@ -116,6 +116,26 @@ def test_long_general_section_uses_fallback_split_and_keeps_page_metadata():
     assert all(len(chunk.page_content) <= 220 for chunk in chunks)
 
 
+def test_identical_parts_from_a_parser_are_deduplicated_by_stable_chunk_id():
+    chunks = ingest_pages(
+        "repeated_table.pdf",
+        [PageText(page=3, text="Technical specifications\nRepeated table footnote")],
+        fallback_splitter=lambda _text, _size, _overlap: ["Repeated table footnote"] * 2,
+    )
+    assert len(chunks) == 1
+    assert len({chunk.metadata["chunk_id"] for chunk in chunks}) == len(chunks)
+
+
+def test_pdf_footnotes_do_not_replace_english_chapter_section_metadata():
+    chunks = ingest_pages(
+        "manual.pdf",
+        [PageText(page=8, text="Chapter 4 Installation\n(1) Available at firmware revision 31.\nGround the controller before wiring.")],
+    )
+    assert len(chunks) == 1
+    assert chunks[0].metadata["section"] == "Chapter 4 Installation"
+    assert "Available at firmware revision 31" in chunks[0].page_content
+
+
 def test_empty_text_pdf_fails_cleanly():
     with pytest.raises(ValueError, match="没有读取到有效文字"):
         ingest_pages("empty.pdf", [PageText(page=0, text="   ")])

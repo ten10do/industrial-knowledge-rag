@@ -17,6 +17,7 @@ HEADING_PATTERNS = (
     re.compile(r"^[一二三四五六七八九十]+、\s*\S.+$"),
     re.compile(r"^[（(][一二三四五六七八九十\d]+[）)]\s*\S.+$"),
 )
+ENGLISH_HEADING_PATTERN = re.compile(r"^(?:chapter\s+\d+|appendix\s+[a-z])\b", re.IGNORECASE)
 KEYWORD_HEADINGS = {
     "概述",
     "技术参数",
@@ -47,7 +48,11 @@ class _Unit:
 
 def _heading_level(line: str) -> int | None:
     value = line.strip()
+    if re.match(r"^[（(]\d+[）)]\s+", value):
+        return None
     if value.casefold() in KEYWORD_HEADINGS:
+        return 1
+    if ENGLISH_HEADING_PATTERN.match(value):
         return 1
     for pattern in HEADING_PATTERNS:
         if pattern.match(value):
@@ -143,6 +148,7 @@ def chunk_pages(
     fallback_splitter: Callable[[str, int, int], list[str]] | None = None,
 ) -> list[IndustrialChunk]:
     chunks = []
+    chunk_ids = set()
     atomic_limit = chunk_size * 2
     units = [
         fault_unit
@@ -166,6 +172,16 @@ def chunk_pages(
             else _recursive_text_split(content, limit, overlap)
         )
         for part in parts:
+            chunk_id = stable_chunk_id(
+                document.document_id,
+                unit.section,
+                unit.subsection,
+                page_start,
+                page_end,
+                part,
+            )
+            if chunk_id in chunk_ids:
+                continue
             metadata = IndustrialDocumentMetadata(
                 **{
                     **document.to_flat_dict(),
@@ -176,16 +192,10 @@ def chunk_pages(
                     "page_end": page_end,
                     "knowledge_type": knowledge_type,
                     "error_code": error_code,
-                    "chunk_id": stable_chunk_id(
-                        document.document_id,
-                        unit.section,
-                        unit.subsection,
-                        page_start,
-                        page_end,
-                        part,
-                    ),
+                    "chunk_id": chunk_id,
                     "chunk_index": len(chunks),
                 }
             ).to_flat_dict()
             chunks.append(IndustrialChunk(part, metadata))
+            chunk_ids.add(chunk_id)
     return chunks
