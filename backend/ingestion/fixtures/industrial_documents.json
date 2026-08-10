@@ -1,0 +1,37 @@
+{
+  "license": "Synthetic test data created for this repository; no vendor manual content.",
+  "documents": [
+    {
+      "file_name": "plc_manual_sample.pdf",
+      "pages": [
+        "IK PLC-100 用户手册\n制造商：Synthetic Controls\n设备型号：IK-PLC-100\n文档版本：V1.0\n发布日期：2026-08-10\n概述\nIK PLC-100 是用于离散控制的可编程逻辑控制器。",
+        "1.1 通信参数\n通信接口：RS-485\n默认波特率：9600 bps\n额定输入电压：24 V"
+      ]
+    },
+    {
+      "file_name": "fault_code_sample.pdf",
+      "pages": [
+        "IK Drive 故障代码\n设备型号：IK-DRV-75\n故障代码\nF0001\n名称：输入缺相\n原因：三相输入电源有一相断开。\n处理方法：检查输入端子和上级断路器。\nF0002\n名称：直流母线过压\n原因：减速时间过短或制动单元未投入。\n处理方法：延长减速时间并检查制动单元。",
+        "A0503\n名称：散热器温度预警\n原因：环境温度偏高或风道堵塞。\n处理方法：清理风道并检查风扇。"
+      ]
+    },
+    {
+      "file_name": "sop_sample.pdf",
+      "pages": [
+        "标准操作规程 SOP\n设备型号：IK-PUMP-20\n准备工作\n确认防护罩安装到位，检查急停按钮处于释放状态。\n操作步骤\n1. 检查电源指示灯。\n2. 打开控制柜总电源。\n3. 选择本地控制模式。\n4. 按下启动按钮。\n安全注意事项\n运行时禁止拆除防护罩。\n异常处理\n出现异常振动时立即停机并挂牌。"
+      ]
+    },
+    {
+      "file_name": "maintenance_sample.pdf",
+      "pages": [
+        "设备维护与保养\n设备型号：IK-FAN-30\n点检内容\n检查项目：冷却风扇\n周期：每月\n标准：叶片无裂纹且运转无异响\n处理方式：异常时停机更换\n检查项目：控制柜滤网\n周期：每两周\n标准：表面无明显积尘\n处理方式：清洁或更换滤网"
+      ]
+    },
+    {
+      "file_name": "general_sample.pdf",
+      "pages": [
+        "项目会议记录\n本文件记录设备改造项目的例会结论、参与人员和后续安排。"
+      ]
+    }
+  ]
+}

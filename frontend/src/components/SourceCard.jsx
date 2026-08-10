@@ -15,6 +15,9 @@ export default function SourceCard({ source, index }) {
           </span>
         </div>
         <div className="source-tags">
+          {source.equipment_model && <span>{source.equipment_model}</span>}
+          {source.section && <span>{source.section}</span>}
+          {source.knowledge_type && <span>{source.knowledge_type}</span>}
           <span>第 {source.page} 页</span>
           <span>距离 {score}</span>
         </div>

@@ -63,6 +63,32 @@ class OfflineEvaluationTests(unittest.TestCase):
         self.assertEqual(metrics["lexical_boundary_accuracy"], 1.00)
         self.assertTrue(self.report["gates_passed"])
 
+    def test_industrial_fixture_meets_ingestion_quality_gates(self):
+        industrial = self.report["industrial"]
+        metrics = industrial["metrics"]
+        self.assertEqual(industrial["document_count"], 4)
+        self.assertEqual(industrial["case_count"], 6)
+        self.assertTrue(industrial["stable"])
+        self.assertEqual(metrics["hit_rate_at_1"], 1.0)
+        self.assertEqual(metrics["hit_rate_at_3"], 1.0)
+        self.assertEqual(metrics["mrr"], 1.0)
+        self.assertEqual(metrics["metadata_accuracy"], 1.0)
+        self.assertEqual(metrics["correct_section_rate"], 1.0)
+        self.assertEqual(metrics["correct_page_rate"], 1.0)
+        self.assertEqual(metrics["fault_code_exact_match_rate"], 1.0)
+
+    def test_industrial_fault_and_ood_cases_use_real_metadata(self):
+        results = {
+            result["id"]: result
+            for result in self.report["industrial"]["case_results"]
+        }
+        f0002 = results["fault-f0002-cause"]["results"][0]
+        self.assertEqual(f0002["error_code"], "F0002")
+        self.assertEqual(f0002["knowledge_type"], "fault")
+        self.assertEqual(f0002["section"], "故障代码")
+        self.assertFalse(results["fault-f0002-cause"]["actual_refuse"])
+        self.assertTrue(results["unknown-f9999"]["actual_refuse"])
+
     def test_multiturn_followups_use_standalone_query_and_real_light_retrieval(self):
         results = {
             result["id"]: result

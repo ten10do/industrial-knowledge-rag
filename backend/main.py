@@ -312,6 +312,18 @@ class SourceItem(BaseModel):
     page: int | str
     score: float
     content: str
+    document_id: str = ""
+    document_type: str = ""
+    manufacturer: str = ""
+    equipment_type: str = ""
+    equipment_model: str = ""
+    section: str = ""
+    subsection: str = ""
+    page_start: int | None = None
+    page_end: int | None = None
+    knowledge_type: str = ""
+    error_code: str = ""
+    chunk_id: str = ""
 
 
 class AskResponse(BaseModel):
@@ -1244,6 +1256,16 @@ def serialize_sources(docs):
         page = metadata.get("page", "未知页码")
         if isinstance(page, int):
             page += 1
+        page_start = metadata.get("page_start")
+        page_end = metadata.get("page_end")
+        if isinstance(page_start, int):
+            page_start += 1
+        else:
+            page_start = None
+        if isinstance(page_end, int):
+            page_end += 1
+        else:
+            page_end = None
 
         sources.append(
             SourceItem(
@@ -1252,6 +1274,18 @@ def serialize_sources(docs):
                 page=page,
                 score=float(score),
                 content=doc.page_content,
+                document_id=str(metadata.get("document_id", "")),
+                document_type=str(metadata.get("document_type", "")),
+                manufacturer=str(metadata.get("manufacturer", "")),
+                equipment_type=str(metadata.get("equipment_type", "")),
+                equipment_model=str(metadata.get("equipment_model", "")),
+                section=str(metadata.get("section", "")),
+                subsection=str(metadata.get("subsection", "")),
+                page_start=page_start,
+                page_end=page_end,
+                knowledge_type=str(metadata.get("knowledge_type", "")),
+                error_code=str(metadata.get("error_code", "")),
+                chunk_id=str(metadata.get("chunk_id", "")),
             )
         )
 
@@ -1383,7 +1417,11 @@ def upload(
         raise HTTPException(status_code=500, detail="知识库构建失败。") from exc
 
 
-@app.post("/ask", response_model=AskResponse)
+@app.post(
+    "/ask",
+    response_model=AskResponse,
+    response_model_exclude_defaults=True,
+)
 def ask(
     request: AskRequest,
     http_request: Request,

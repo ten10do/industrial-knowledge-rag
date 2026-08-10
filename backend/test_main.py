@@ -985,6 +985,38 @@ class FastApiBackendTests(unittest.TestCase):
             provider="DeepSeek",
         )
 
+    def test_source_serialization_exposes_industrial_citation_metadata(self):
+        docs = [
+            (
+                SimpleNamespace(
+                    page_content="额定输入电压：24 V",
+                    metadata={
+                        "source": "plc.pdf",
+                        "page": 1,
+                        "page_start": 1,
+                        "page_end": 2,
+                        "document_id": "doc-stable",
+                        "document_type": "manual",
+                        "equipment_model": "IK-PLC-100",
+                        "section": "通信参数",
+                        "knowledge_type": "parameter",
+                        "chunk_id": "chunk-stable",
+                    },
+                ),
+                0.1,
+            )
+        ]
+        source = main_module.serialize_sources(docs)[0]
+        self.assertEqual(source.source, "plc.pdf")
+        self.assertEqual(source.page, 2)
+        self.assertEqual(source.page_start, 2)
+        self.assertEqual(source.page_end, 3)
+        self.assertEqual(source.section, "通信参数")
+        self.assertEqual(source.equipment_model, "IK-PLC-100")
+        self.assertEqual(source.knowledge_type, "parameter")
+        self.assertEqual(source.document_id, "doc-stable")
+        self.assertEqual(source.chunk_id, "chunk-stable")
+
     def test_model_quota_exhaustion_returns_429_and_quota_headers(self):
         docs = [
             (

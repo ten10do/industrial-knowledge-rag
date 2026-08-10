@@ -261,6 +261,22 @@ class LightRagCoreTests(unittest.TestCase):
                 self.assertTrue(
                     all("page" in result[0].metadata for result in results)
                 )
+                feedback_results = [
+                    result[0]
+                    for result in results
+                    if result[0].metadata["source"] == "feedback.pdf"
+                ]
+                self.assertEqual(
+                    {result.metadata["page_start"] for result in feedback_results},
+                    {0, 1},
+                )
+                self.assertTrue(
+                    all(
+                        result.metadata["page_start"]
+                        == result.metadata["page_end"]
+                        for result in feedback_results
+                    )
+                )
 
                 unrelated = light_rag_core.retrieve_docs("量子化学分子轨道", k=1)
                 self.assertFalse(light_rag_core.has_relevant_docs(unrelated))

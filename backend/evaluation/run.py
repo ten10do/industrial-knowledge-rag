@@ -16,6 +16,9 @@ from backend.conversation.models import ContextOptions, ConversationTurn
 
 
 DATASET_PATH = Path(__file__).resolve().parent / "fixtures" / "dataset.json"
+INDUSTRIAL_DATASET_PATH = (
+    Path(__file__).resolve().parent / "fixtures" / "industrial_dataset.json"
+)
 QUALITY_GATES = {
     "hit_rate_at_3": 0.80,
     "mrr": 0.70,
@@ -51,6 +54,33 @@ def load_dataset(path: Path = DATASET_PATH) -> dict:
     with path.open("r", encoding="utf-8") as dataset_file:
         dataset = json.load(dataset_file)
     validate_dataset(dataset)
+    return dataset
+
+
+def load_industrial_dataset(path: Path = INDUSTRIAL_DATASET_PATH) -> dict:
+    with path.open("r", encoding="utf-8") as dataset_file:
+        dataset = json.load(dataset_file)
+    documents = dataset.get("documents")
+    cases = dataset.get("cases")
+    if not isinstance(documents, list) or len(documents) < 4:
+        raise ValueError("Industrial evaluation requires at least four documents.")
+    if not isinstance(cases, list) or len(cases) < 6:
+        raise ValueError("Industrial evaluation requires at least six cases.")
+    sources = {document.get("source") for document in documents}
+    for document in documents:
+        if not isinstance(document.get("source"), str) or not document["source"].endswith(".pdf"):
+            raise ValueError("Industrial fixture requires PDF source names.")
+        if not document.get("pages") or not all(
+            isinstance(page, str) and page.strip() for page in document["pages"]
+        ):
+            raise ValueError("Industrial fixture pages must contain text.")
+    for case in cases:
+        if not isinstance(case.get("question"), str) or not case["question"].strip():
+            raise ValueError("Industrial cases require questions.")
+        if not set(case.get("expected_sources", [])).issubset(sources):
+            raise ValueError("Industrial case references an unknown source.")
+        if not isinstance(case.get("should_refuse"), bool):
+            raise ValueError("Industrial cases require a refusal decision.")
     return dataset
 
 
@@ -271,11 +301,22 @@ def offline_knowledge_base(dataset: dict):
 
 
 def _normalize_result(document, score: float) -> dict:
+    metadata = document.metadata
     return {
         "source": document.metadata.get("source"),
         "page": document.metadata.get("page"),
         "content": document.page_content,
         "score": score,
+        "document_id": metadata.get("document_id", ""),
+        "document_type": metadata.get("document_type", ""),
+        "equipment_model": metadata.get("equipment_model", ""),
+        "section": metadata.get("section", ""),
+        "subsection": metadata.get("subsection", ""),
+        "page_start": metadata.get("page_start", metadata.get("page")),
+        "page_end": metadata.get("page_end", metadata.get("page")),
+        "knowledge_type": metadata.get("knowledge_type", ""),
+        "error_code": metadata.get("error_code", ""),
+        "chunk_id": metadata.get("chunk_id", ""),
     }
 
 
@@ -525,6 +566,152 @@ def calibrate_relevance_threshold(
     }
 
 
+def calculate_industrial_metrics(
+    cases: list[dict],
+    case_results: list[dict],
+) -> dict:
+    base_metrics = calculate_metrics(cases, case_results)
+    results_by_id = {result["id"]: result for result in case_results}
+    answerable = [case for case in cases if not case["should_refuse"]]
+    rich_metadata_items = []
+    section_matches = 0
+    page_matches = 0
+    fault_matches = 0
+    fault_cases = [case for case in answerable if case["expected_error_code"]]
+
+    for case in answerable:
+        result = results_by_id[case["id"]]
+        rich_metadata_items.extend(result["results"])
+        first = result["results"][0] if result["results"] else {}
+        section_matches += case["expected_section"] in {
+            first.get("section"),
+            first.get("subsection"),
+        }
+        page_matches += first.get("page") == case["expected_page"]
+        if case["expected_error_code"]:
+            fault_matches += (
+                first.get("error_code") == case["expected_error_code"]
+            )
+
+    rich_metadata_complete = sum(
+        bool(
+            item.get("document_id")
+            and item.get("chunk_id")
+            and item.get("section")
+            and item.get("knowledge_type")
+            and isinstance(item.get("page_start"), int)
+            and isinstance(item.get("page_end"), int)
+        )
+        for item in rich_metadata_items
+    )
+    base_metrics.update(
+        {
+            "metadata_accuracy": (
+                rich_metadata_complete / len(rich_metadata_items)
+                if rich_metadata_items
+                else 0.0
+            ),
+            "correct_section_rate": (
+                section_matches / len(answerable) if answerable else 0.0
+            ),
+            "correct_page_rate": (
+                page_matches / len(answerable) if answerable else 0.0
+            ),
+            "fault_code_exact_match_rate": (
+                fault_matches / len(fault_cases) if fault_cases else 0.0
+            ),
+        }
+    )
+    return base_metrics
+
+
+def evaluate_industrial_once(dataset: dict, top_k: int = 3) -> dict:
+    case_results = []
+    with offline_knowledge_base(dataset) as (
+        light_rag_core,
+        page_count,
+        chunk_count,
+    ):
+        for case in dataset["cases"]:
+            scored_documents = light_rag_core.retrieve_docs(
+                case["question"],
+                k=top_k,
+            )
+            results = [
+                _normalize_result(document, score)
+                for document, score in scored_documents
+            ]
+            combined_content = "\n".join(item["content"] for item in results)
+            case_results.append(
+                {
+                    "id": case["id"],
+                    "actual_refuse": not light_rag_core.has_relevant_docs(
+                        scored_documents
+                    ),
+                    "keyword_match": all(
+                        keyword in combined_content
+                        for keyword in case["expected_keywords"]
+                    ),
+                    "results": results,
+                }
+            )
+    return {
+        "document_count": len(dataset["documents"]),
+        "case_count": len(dataset["cases"]),
+        "page_count": page_count,
+        "chunk_count": chunk_count,
+        "case_results": case_results,
+        "metrics": calculate_industrial_metrics(
+            dataset["cases"],
+            case_results,
+        ),
+    }
+
+
+def run_industrial_evaluation(
+    dataset_path: Path = INDUSTRIAL_DATASET_PATH,
+    repeat_runs: int = 2,
+) -> dict:
+    if repeat_runs < 2:
+        raise ValueError("repeat_runs must be at least 2 to verify stability.")
+    dataset = load_industrial_dataset(dataset_path)
+    reports = [evaluate_industrial_once(dataset) for _ in range(repeat_runs)]
+    report = reports[0]
+    signature = tuple(
+        (
+            result["id"],
+            result["actual_refuse"],
+            tuple(
+                (
+                    item["chunk_id"],
+                    round(item["score"], 10),
+                )
+                for item in result["results"]
+            ),
+        )
+        for result in report["case_results"]
+    )
+    report["stable"] = all(
+        signature
+        == tuple(
+            (
+                result["id"],
+                result["actual_refuse"],
+                tuple(
+                    (
+                        item["chunk_id"],
+                        round(item["score"], 10),
+                    )
+                    for item in result["results"]
+                ),
+            )
+            for result in candidate["case_results"]
+        )
+        for candidate in reports[1:]
+    )
+    return report
+
+
 def evaluate_once(dataset: dict, top_k: int = 3) -> dict:
     case_results = []
     with offline_knowledge_base(dataset) as (
@@ -674,15 +861,31 @@ def run_evaluation(
         _stability_signature(candidate) == first_signature
         for candidate in reports[1:]
     )
+    report["industrial"] = run_industrial_evaluation()
     report["gates_passed"] = quality_gates_pass(report)
     return report
 
 
 def quality_gates_pass(report: dict) -> bool:
     metrics = report["metrics"]
-    return bool(report.get("stable")) and all(
+    baseline_passed = bool(report.get("stable")) and all(
         metrics[metric] >= threshold
         for metric, threshold in QUALITY_GATES.items()
+    )
+    industrial = report.get("industrial")
+    if not industrial:
+        return baseline_passed
+    industrial_metrics = industrial["metrics"]
+    return baseline_passed and bool(industrial.get("stable")) and all(
+        (
+            industrial_metrics["hit_rate_at_3"] >= 0.80,
+            industrial_metrics["mrr"] >= 0.70,
+            industrial_metrics["metadata_accuracy"] == 1.00,
+            industrial_metrics["correct_section_rate"] >= 0.80,
+            industrial_metrics["correct_page_rate"] >= 0.80,
+            industrial_metrics["fault_code_exact_match_rate"] == 1.00,
+            industrial_metrics["decision_accuracy"] >= 0.80,
+        )
     )
 
 
@@ -734,6 +937,28 @@ def main(argv=None) -> int:
         "Lexical boundary accuracy: "
         f"{metrics.get('lexical_boundary_accuracy', 0.0):.3f}"
     )
+    industrial = report.get("industrial")
+    if industrial:
+        industrial_metrics = industrial["metrics"]
+        print(
+            "Industrial fixture: "
+            f"{industrial['document_count']} documents, "
+            f"{industrial['case_count']} cases, "
+            f"{industrial['chunk_count']} chunks"
+        )
+        print(
+            "Industrial Hit Rate@1 / @3 / MRR: "
+            f"{industrial_metrics['hit_rate_at_1']:.3f} / "
+            f"{industrial_metrics['hit_rate_at_3']:.3f} / "
+            f"{industrial_metrics['mrr']:.3f}"
+        )
+        print(
+            "Industrial metadata / section / page / fault-code exact: "
+            f"{industrial_metrics['metadata_accuracy']:.3f} / "
+            f"{industrial_metrics['correct_section_rate']:.3f} / "
+            f"{industrial_metrics['correct_page_rate']:.3f} / "
+            f"{industrial_metrics['fault_code_exact_match_rate']:.3f}"
+        )
     print(f"Stable across repeated runs: {'yes' if report['stable'] else 'no'}")
     print(f"Quality gates: {'PASS' if report['gates_passed'] else 'FAIL'}")
     return 0 if report["gates_passed"] else 1

@@ -9,9 +9,11 @@ from uuid import uuid4
 from pypdf import PdfReader
 
 if __package__:
+    from .ingestion import PageText, ingest_pages
     from .learning_content import generate_hierarchical_learning_content
     from .llm_client import generate_llm_answer
 else:
+    from ingestion import PageText, ingest_pages
     from learning_content import generate_hierarchical_learning_content
     from llm_client import generate_llm_answer
 
@@ -147,41 +149,22 @@ def load_knowledge_base(knowledge_base_id: str = "default") -> bool:
     return True
 
 
-def split_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP):
-    chunks = []
-    start = 0
-
-    while start < len(text):
-        end = min(start + chunk_size, len(text))
-        content = text[start:end].strip()
-        if content:
-            chunks.append(content)
-        if end == len(text):
-            break
-        start = end - overlap
-
-    return chunks
-
-
 def _documents_for_pdf(pdf_path: Path) -> list[LightDocument]:
     reader = PdfReader(str(pdf_path))
-    documents = []
-    source_name = pdf_path.name
+    pages = []
     for page_number, page in enumerate(reader.pages):
         page_text = (page.extract_text() or "").strip()
-        if not page_text:
-            continue
-        for content in split_text(page_text):
-            documents.append(
-                LightDocument(
-                    page_content=content,
-                    metadata={
-                        "source": source_name,
-                        "page": page_number,
-                    },
-                )
-            )
-    return documents
+        if page_text:
+            pages.append(PageText(page_number, page_text))
+    return [
+        LightDocument(chunk.page_content, chunk.metadata)
+        for chunk in ingest_pages(
+            pdf_path,
+            pages,
+            chunk_size=CHUNK_SIZE,
+            overlap=CHUNK_OVERLAP,
+        )
+    ]
 
 
 def _serialize_documents(documents) -> list[dict]:
@@ -225,7 +208,7 @@ def build_knowledge_base_incremental(
     previous_files = (
         previous_cache.get("files", {})
         if previous_cache
-        and previous_cache.get("schema_version") == 1
+        and previous_cache.get("schema_version") == 2
         and previous_cache.get("rag_mode") == "light"
         else {}
     )
@@ -275,13 +258,17 @@ def build_knowledge_base_incremental(
         {
             (
                 document.metadata.get("source"),
-                document.metadata.get("page"),
+                page_number,
             )
             for document in documents
+            for page_number in range(
+                int(document.metadata.get("page_start", document.metadata.get("page", 0))),
+                int(document.metadata.get("page_end", document.metadata.get("page", 0))) + 1,
+            )
         }
     )
     cache = {
-        "schema_version": 1,
+        "schema_version": 2,
         "rag_mode": "light",
         "files": files_cache,
     }

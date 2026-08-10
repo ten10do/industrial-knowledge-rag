@@ -12,9 +12,11 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 if __package__:
+    from .ingestion import PageText, ingest_pages
     from .learning_content import generate_hierarchical_learning_content
     from .llm_client import generate_llm_answer
 else:
+    from ingestion import PageText, ingest_pages
     from learning_content import generate_hierarchical_learning_content
     from llm_client import generate_llm_answer
 
@@ -43,6 +45,7 @@ def load_pdf(file_path: str | os.PathLike):
     for page_number, doc in enumerate(documents):
         doc.metadata["source"] = source_name
         doc.metadata.setdefault("page", page_number)
+        doc.metadata["_file_path"] = str(file_path)
 
     return documents
 
@@ -53,15 +56,51 @@ def split_documents(documents):
             "PDF 没有读取到有效文字内容。请使用文字版 PDF，不要使用扫描版 PDF。"
         )
 
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=150
+    first_metadata = getattr(documents[0], "metadata", {}) or {}
+    file_path = first_metadata.get("_file_path") or first_metadata.get(
+        "source",
+        "document.pdf",
     )
-    chunks = text_splitter.split_documents(documents)
-    chunks = [
-        chunk for chunk in chunks
-        if chunk.page_content and chunk.page_content.strip()
+    pages = [
+        PageText(
+            int((getattr(document, "metadata", {}) or {}).get("page", index)),
+            document.page_content,
+        )
+        for index, document in enumerate(documents)
+        if document.page_content and document.page_content.strip()
     ]
+
+    def recursive_fallback(text: str, chunk_size: int, overlap: int):
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=overlap,
+        )
+        return splitter.split_text(text)
+
+    industrial_chunks = ingest_pages(
+        file_path,
+        pages,
+        fallback_splitter=recursive_fallback,
+    )
+    try:
+        from langchain_core.documents import Document
+    except ImportError:
+        document_type = type(documents[0])
+        chunks = [
+            document_type(
+                page_content=chunk.page_content,
+                metadata=chunk.metadata,
+            )
+            for chunk in industrial_chunks
+        ]
+    else:
+        chunks = [
+            Document(
+                page_content=chunk.page_content,
+                metadata=chunk.metadata,
+            )
+            for chunk in industrial_chunks
+        ]
 
     if not chunks:
         raise ValueError("PDF 切分后没有得到有效文本块。")
@@ -187,7 +226,7 @@ def build_knowledge_base_incremental(
     previous_files = (
         previous_cache.get("files", {})
         if previous_cache
-        and previous_cache.get("schema_version") == 1
+        and previous_cache.get("schema_version") == 2
         and previous_cache.get("rag_mode") == "full"
         else {}
     )
@@ -220,10 +259,13 @@ def build_knowledge_base_incremental(
                 )
             chunks = split_documents(documents)
             ids = [
-                hashlib.sha256(
-                    f"{path.name}:{digest}:{index}".encode("utf-8")
-                ).hexdigest()
-                for index in range(len(chunks))
+                str(
+                    chunk.metadata.get("chunk_id")
+                    or hashlib.sha256(
+                        f"{path.name}:{digest}:{index}".encode("utf-8")
+                    ).hexdigest()
+                )
+                for index, chunk in enumerate(chunks)
             ]
             changed_files.add(path.name)
         all_chunks.extend(chunks)
@@ -317,13 +359,17 @@ def build_knowledge_base_incremental(
         {
             (
                 chunk.metadata.get("source"),
-                chunk.metadata.get("page"),
+                page_number,
             )
             for chunk in all_chunks
+            for page_number in range(
+                int(chunk.metadata.get("page_start", chunk.metadata.get("page", 0))),
+                int(chunk.metadata.get("page_end", chunk.metadata.get("page", 0))) + 1,
+            )
         }
     )
     cache = {
-        "schema_version": 1,
+        "schema_version": 2,
         "rag_mode": "full",
         "files": files_cache,
     }

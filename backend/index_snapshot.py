@@ -7,8 +7,12 @@ from pathlib import Path
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
+try:
+    from .ingestion.models import INGESTION_SCHEMA_VERSION
+except ImportError:
+    from ingestion.models import INGESTION_SCHEMA_VERSION
 
-SNAPSHOT_SCHEMA_VERSION = 1
+SNAPSHOT_SCHEMA_VERSION = 2
 FULL_EMBEDDING_MODEL = (
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 )
@@ -20,6 +24,7 @@ def build_fingerprint(rag_mode: str) -> str:
         "rag_mode": rag_mode,
         "chunk_size": 800,
         "chunk_overlap": 150,
+        "ingestion_schema_version": INGESTION_SCHEMA_VERSION,
     }
     if rag_mode == "full":
         payload["embedding_model"] = FULL_EMBEDDING_MODEL

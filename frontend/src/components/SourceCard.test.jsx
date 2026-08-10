@@ -14,6 +14,9 @@ describe('SourceCard', () => {
           page: 3,
           score: 9.25,
           content: 'PLC 扫描周期参考内容',
+          equipment_model: 'IK-PLC-100',
+          section: '1.1 通信参数',
+          knowledge_type: 'parameter',
         }}
       />,
     )
@@ -23,5 +26,8 @@ describe('SourceCard', () => {
     expect(screen.getByText('第 3 页')).toBeInTheDocument()
     expect(screen.getByText('距离 9.2500')).toBeInTheDocument()
     expect(screen.getByText('PLC 扫描周期参考内容')).toBeInTheDocument()
+    expect(screen.getByText('IK-PLC-100')).toBeInTheDocument()
+    expect(screen.getByText('1.1 通信参数')).toBeInTheDocument()
+    expect(screen.getByText('parameter')).toBeInTheDocument()
   })
 })
