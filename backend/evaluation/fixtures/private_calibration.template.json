@@ -1,0 +1,20 @@
+{
+  "name": "v3.2-private-calibration-local-only",
+  "corpus_annotation_sha256": "V3.1 annotation_hash output",
+  "freeze": {
+    "timestamp": "YYYY-MM-DDTHH:MM:SSZ",
+    "calibration_sha256": "calibration_hash output"
+  },
+  "queries": [
+    {
+      "query_id": "c01",
+      "query": "An independent calibration query, not copied from V3.1.",
+      "category": "safety",
+      "answerable": true,
+      "relevant_chunk_ids": ["chunk-from-parser-audit"],
+      "expected_model": "Verified model or series",
+      "expected_error_code": "",
+      "ood_type": ""
+    }
+  ]
+}

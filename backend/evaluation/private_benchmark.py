@@ -8,6 +8,7 @@ import statistics
 import time
 from collections import Counter, defaultdict
 from contextlib import ExitStack
+from dataclasses import asdict
 from pathlib import Path
 
 from langchain_core.documents import Document
@@ -20,6 +21,7 @@ from backend.evaluation.full_vector_benchmark import (
 )
 from backend.evaluation.retrieval_benchmark import benchmark_knowledge_base
 from backend.retrieval.reranker import CrossEncoderReranker, RerankerConfig
+from backend.retrieval.evidence import analyze_retrieval_evidence
 
 
 PRIVATE_REQUIRED_DOCUMENT_FIELDS = {
@@ -50,6 +52,11 @@ def annotation_hash(manifest: dict) -> str:
     """Hash only the frozen labels, not local paths or downloaded file bytes."""
     frozen = {"documents": manifest["documents"], "queries": manifest["queries"]}
     payload = json.dumps(frozen, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def calibration_hash(calibration: dict) -> str:
+    payload = json.dumps(calibration["queries"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -87,6 +94,39 @@ def load_private_manifest(path: Path) -> dict:
     return manifest
 
 
+def load_private_calibration(path: Path, manifest: dict, chunk_ids: set[str]) -> dict:
+    calibration = json.loads(path.read_text(encoding="utf-8"))
+    queries = calibration.get("queries", [])
+    if not 20 <= len(queries) <= 30:
+        raise ValueError("V3.2 calibration requires 20 to 30 independent queries.")
+    if sum(bool(item.get("answerable")) for item in queries) < 12:
+        raise ValueError("V3.2 calibration requires at least 12 answerable queries.")
+    if sum(not bool(item.get("answerable")) for item in queries) < 8:
+        raise ValueError("V3.2 calibration requires at least 8 OOD queries.")
+    required = {
+        "query_id", "query", "category", "answerable", "relevant_chunk_ids",
+        "expected_model", "expected_error_code", "ood_type",
+    }
+    query_ids = set()
+    frozen_queries = {item["query"].strip().casefold() for item in manifest["queries"]}
+    for item in queries:
+        if not required.issubset(item) or item["query_id"] in query_ids:
+            raise ValueError("V3.2 calibration query schema or ID is invalid.")
+        if item["query"].strip().casefold() in frozen_queries:
+            raise ValueError("Calibration queries must be independent from V3.1 evaluation queries.")
+        if item["answerable"] != bool(item["relevant_chunk_ids"]):
+            raise ValueError("Calibration answerable flag must match relevant chunks.")
+        if not set(item["relevant_chunk_ids"]).issubset(chunk_ids):
+            raise ValueError("Calibration query references an unknown chunk.")
+        query_ids.add(item["query_id"])
+    if calibration.get("corpus_annotation_sha256") != annotation_hash(manifest):
+        raise ValueError("Calibration corpus annotation hash does not match V3.1.")
+    frozen_hash = calibration.get("freeze", {}).get("calibration_sha256")
+    if frozen_hash and frozen_hash != calibration_hash(calibration):
+        raise ValueError("Calibration hash does not match the frozen query set.")
+    return calibration
+
+
 def _resolve_local_file(manifest_path: Path, value: str) -> Path:
     root = manifest_path.parent.resolve()
     source = (root / value).resolve()
@@ -108,6 +148,9 @@ def ingest_private_documents(manifest_path: Path, manifest: dict) -> tuple[list[
             raise ValueError(f"Industrial Ingestion produced no chunks for {entry['document_id']}.")
         for chunk in chunks:
             metadata = chunk.metadata
+            aliases = entry.get("model_aliases", "")
+            if isinstance(aliases, list):
+                aliases = "|".join(str(item) for item in aliases)
             metadata.update({
                 "document_id": entry["document_id"],
                 "source": entry["source_name"],
@@ -116,6 +159,9 @@ def ingest_private_documents(manifest_path: Path, manifest: dict) -> tuple[list[
                 "manufacturer": entry["manufacturer"],
                 "equipment_type": entry["equipment_type"],
                 "equipment_model": entry["equipment_model"],
+                "product_family": entry.get("product_family", ""),
+                "product_series": entry.get("product_series", ""),
+                "model_aliases": aliases,
                 "document_type": entry["document_type"],
                 "language": entry["language"],
                 "document_version": entry["version"],
@@ -266,27 +312,57 @@ def _rerank_analysis(rows: list[dict]) -> dict:
     }
 
 
-def _evidence_report(queries: list[dict], documents: list[Document]) -> dict:
-    rows = []
-    for query in queries:
-        result = rag_core.retrieve_docs(query["query"], k=5, knowledge_base_id=FULL_BENCHMARK_KNOWLEDGE_BASE_ID, retrieval_mode="hybrid")
-        evidence = rag_core.analyze_evidence(query["query"], result, "hybrid")
-        row = {"query_id": query["query_id"], "query": query["query"], "answerable": query["answerable"], **evidence.as_dict()}
-        if query["answerable"] and row["decision"] == "ABSTAIN":
-            row["false_refusal_type"] = FALSE_REFUSAL_REASONS.get(row["reason"], "OTHER")
-            row["top_candidate"] = _candidate_rows(result.candidates)[:1]
-            row["expected_evidence"] = {
-                "chunk_ids": query["relevant_chunk_ids"],
-                "document_ids": query["relevant_document_ids"],
-                "model": query["expected_model"],
-                "error_code": query["expected_error_code"],
-                "section": query["expected_section"],
+def _evidence_row(query: dict, result, evidence, documents_by_chunk: dict[str, Document]) -> dict:
+    analysis = getattr(result, "query_analysis", None)
+    row = {
+        "query_id": query["query_id"],
+        "query": query["query"],
+        "category": query.get("category", ""),
+        "ood_type": query.get("ood_type", ""),
+        "answerable": query["answerable"],
+        "parsed_query_metadata": asdict(analysis) if analysis else {},
+        "relevant_chunk_metadata": [
+            {
+                "chunk_id": chunk_id,
+                "document_id": document.metadata.get("document_id", ""),
+                "manufacturer": document.metadata.get("manufacturer", ""),
+                "equipment_model": document.metadata.get("equipment_model", ""),
+                "product_family": document.metadata.get("product_family", ""),
+                "product_series": document.metadata.get("product_series", ""),
+                "section": document.metadata.get("section", ""),
+                "page": document.metadata.get("page"),
+                "error_code": document.metadata.get("error_code", ""),
             }
-        rows.append(row)
+            for chunk_id in query["relevant_chunk_ids"]
+            if (document := documents_by_chunk.get(chunk_id)) is not None
+        ],
+        "top_candidate": _candidate_rows(result.candidates)[:1],
+        **evidence.as_dict(),
+    }
+    if query["answerable"] and row["decision"] == "ABSTAIN":
+        row["false_refusal_type"] = FALSE_REFUSAL_REASONS.get(row["reason"], "OTHER")
+        row["expected_evidence"] = {
+            "chunk_ids": query["relevant_chunk_ids"],
+            "document_ids": query.get("relevant_document_ids", []),
+            "model": query["expected_model"],
+            "error_code": query["expected_error_code"],
+            "section": query.get("expected_section", ""),
+        }
+    return row
+
+
+def _summarize_evidence(rows: list[dict]) -> dict:
     answerable = [item for item in rows if item["answerable"]]
     ood = [item for item in rows if not item["answerable"]]
     false_refusal = [item for item in answerable if item["decision"] == "ABSTAIN"]
     false_answer = [item for item in ood if item["decision"] == "ANSWER"]
+    ood_categories = {}
+    for category in sorted({item.get("ood_type") or "unclassified" for item in ood}):
+        category_rows = [item for item in ood if (item.get("ood_type") or "unclassified") == category]
+        ood_categories[category] = {
+            "count": len(category_rows),
+            "recall": sum(item["decision"] == "ABSTAIN" for item in category_rows) / len(category_rows),
+        }
     return {
         "decision_accuracy": sum((item["decision"] == "ANSWER") == item["answerable"] for item in rows) / len(rows),
         "ood_recall": sum(item["decision"] == "ABSTAIN" for item in ood) / len(ood) if ood else None,
@@ -294,16 +370,82 @@ def _evidence_report(queries: list[dict], documents: list[Document]) -> dict:
         "false_answer_rate": len(false_answer) / len(ood) if ood else None,
         "false_refusal_rate": len(false_refusal) / len(answerable),
         "false_refusals": false_refusal,
+        "false_answers": false_answer,
         "false_refusal_taxonomy": dict(Counter(item["false_refusal_type"] for item in false_refusal)),
+        "ood_category_metrics": ood_categories,
+        "rows": rows,
+    }
+
+
+def _evidence_report(queries: list[dict], documents: list[Document]) -> dict:
+    documents_by_chunk = {str(item.metadata.get("chunk_id", "")): item for item in documents}
+    rows = []
+    for query in queries:
+        result = rag_core.retrieve_docs(query["query"], k=5, knowledge_base_id=FULL_BENCHMARK_KNOWLEDGE_BASE_ID, retrieval_mode="hybrid")
+        evidence = rag_core.analyze_evidence(query["query"], result, "hybrid")
+        rows.append(_evidence_row(query, result, evidence, documents_by_chunk))
+    return _summarize_evidence(rows)
+
+
+def _calibration_report(queries: list[dict], documents: list[Document]) -> dict:
+    documents_by_chunk = {str(item.metadata.get("chunk_id", "")): item for item in documents}
+    before_rows, after_rows = [], []
+    for query in queries:
+        result = rag_core.retrieve_docs(query["query"], k=5, knowledge_base_id=FULL_BENCHMARK_KNOWLEDGE_BASE_ID, retrieval_mode="hybrid")
+        before = analyze_retrieval_evidence(
+            query["query"], result, documents, "hybrid", identity_matching=False,
+        )
+        after = analyze_retrieval_evidence(query["query"], result, documents, "hybrid")
+        before_rows.append(_evidence_row(query, result, before, documents_by_chunk))
+        after_rows.append(_evidence_row(query, result, after, documents_by_chunk))
+    before_report, after_report = _summarize_evidence(before_rows), _summarize_evidence(after_rows)
+    metric_names = (
+        "decision_accuracy", "ood_recall", "answerable_recall",
+        "false_answer_rate", "false_refusal_rate",
+    )
+    return {
+        "before": before_report,
+        "after": after_report,
+        "delta": {name: after_report[name] - before_report[name] for name in metric_names},
+    }
+
+
+def run_private_calibration(manifest_path: Path) -> dict:
+    manifest = load_private_manifest(manifest_path)
+    ingested, _ = ingest_private_documents(manifest_path, manifest)
+    calibration_path = manifest_path.parent / "annotations" / "v32_calibration.json"
+    calibration = load_private_calibration(
+        calibration_path,
+        manifest,
+        {item.metadata["chunk_id"] for item in ingested},
+    )
+    with full_vector_knowledge_base(ingested):
+        report = _calibration_report(calibration["queries"], ingested)
+    return {
+        "name": calibration.get("name", "v3.2-private-calibration"),
+        "corpus_annotation_sha256": annotation_hash(manifest),
+        "documents": len(manifest["documents"]),
+        "answerable": sum(item["answerable"] for item in calibration["queries"]),
+        "ood": sum(not item["answerable"] for item in calibration["queries"]),
+        "total": len(calibration["queries"]),
+        "hash": calibration_hash(calibration),
+        **report,
     }
 
 
 def run_private_benchmark(manifest_path: Path) -> dict:
     manifest = load_private_manifest(manifest_path)
     ingested, audit = ingest_private_documents(manifest_path, manifest)
-    unknown = set().union(*(set(item["relevant_chunk_ids"]) for item in manifest["queries"])) - {item.metadata["chunk_id"] for item in ingested}
+    ingested_chunk_ids = {item.metadata["chunk_id"] for item in ingested}
+    unknown = set().union(*(set(item["relevant_chunk_ids"]) for item in manifest["queries"])) - ingested_chunk_ids
     if unknown:
         raise ValueError(f"Annotation references chunks absent after Industrial Ingestion: {sorted(unknown)}")
+    calibration_path = manifest_path.parent / "annotations" / "v32_calibration.json"
+    calibration = (
+        load_private_calibration(calibration_path, manifest, ingested_chunk_ids)
+        if calibration_path.exists()
+        else None
+    )
     benchmark = {"documents": [{"content": item.page_content, "metadata": dict(item.metadata)} for item in ingested]}
     reranker = CrossEncoderReranker(RerankerConfig(enabled=True, candidate_k=5, top_k=3, device="cpu"))
     with ExitStack() as stack:
@@ -311,6 +453,7 @@ def run_private_benchmark(manifest_path: Path) -> dict:
         stack.enter_context(full_vector_knowledge_base(ingested))
         reports = {mode: _run_mode(mode, manifest["queries"], light_rag, light_id, reranker) for mode in PRIVATE_MODES}
         evidence = _evidence_report(manifest["queries"], ingested)
+        calibration_report = _calibration_report(calibration["queries"], ingested) if calibration else None
     counts = Counter(item["document_type"] for item in manifest["documents"])
     return {
         "dataset": manifest.get("name", "private-real-corpus"),
@@ -328,4 +471,13 @@ def run_private_benchmark(manifest_path: Path) -> dict:
         "query_distribution": dict(Counter(item["category"] for item in manifest["queries"])),
         "reports": reports,
         "evidence": evidence,
+        "calibration": ({
+            "name": calibration.get("name", "v3.2-private-calibration"),
+            "documents": len(manifest["documents"]),
+            "answerable": sum(item["answerable"] for item in calibration["queries"]),
+            "ood": sum(not item["answerable"] for item in calibration["queries"]),
+            "total": len(calibration["queries"]),
+            "hash": calibration_hash(calibration),
+            **calibration_report,
+        } if calibration else {"status": "NOT_RUN"}),
     }

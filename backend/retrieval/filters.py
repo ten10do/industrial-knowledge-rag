@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .product_identity import identity_from_query
+
 
 IDENTIFIER_PATTERN = re.compile(
     r"(?<![a-z0-9])(?:0x[0-9a-f]+|[fae]\d{2,5})(?![a-z0-9])", re.IGNORECASE
@@ -20,6 +22,9 @@ class QueryAnalysis:
     equipment_type: str = ""
     document_type: str = ""
     knowledge_type: str = ""
+    product_family: str = ""
+    product_series: str = ""
+    identity_confidence: str = "UNKNOWN"
 
 
 def _values(documents: list, key: str) -> dict[str, str]:
@@ -43,17 +48,21 @@ def analyze_query(query: str, documents: list) -> QueryAnalysis:
     def mentioned(values: dict[str, str]) -> str:
         return next((original for value, original in values.items() if value in normalized), "")
 
-    model = mentioned(models)
+    identity, identity_confidence = identity_from_query(query, documents)
+    model = identity.equipment_model or mentioned(models)
     if not model:
         model_match = MODEL_PATTERN.search(query or "")
         model = model_match.group(0) if model_match else ""
     return QueryAnalysis(
         error_code=(codes[0].upper() if codes else ""),
         equipment_model=model,
-        manufacturer=mentioned(manufacturers),
+        manufacturer=identity.manufacturer or mentioned(manufacturers),
         equipment_type=mentioned(equipment_types),
         document_type=mentioned(document_types),
         knowledge_type=mentioned(knowledge_types),
+        product_family=identity.product_family,
+        product_series=identity.product_series,
+        identity_confidence=identity_confidence,
     )
 
 

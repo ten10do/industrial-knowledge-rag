@@ -4,19 +4,29 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 
 from .filters import QueryAnalysis, analyze_query
+from .product_identity import (
+    IdentityRelation,
+    ProductIdentity,
+    identities_from_documents,
+    identity_from_metadata,
+    identity_is_compatible,
+    identity_relation,
+)
 
 
 DETAIL_MARKERS = (
     "n·m", "nm", "扭矩", "牌号", "年限", "校准", "证书", "备份", "耐压",
     "固件", "igbt", "pcb", "轴承", "润滑脂", "更换周期", "firmware", "backup",
     "certificate", "calibration", "torque", "bearing", "grease", "insulation",
+    "bluetooth", "pairing", "station name", "mqtt", "broker",
+    "配对", "默认端口", "预防性更换", "主板电容",
 )
 EVIDENCE_IDENTIFIER_PATTERN = re.compile(
-    r"(?<![a-z0-9])(?:0x[0-9a-f]+|[faep]\d{2,5}|mw\d{1,5}|4\d{4})(?![a-z0-9])",
+    r"(?<![a-z0-9])(?:0x[0-9a-f]+|[faceps]\d{2,5}|mw\d{1,5}|4\d{4})(?![a-z0-9])",
     re.IGNORECASE,
 )
 EVIDENCE_MODEL_PATTERN = re.compile(
@@ -35,6 +45,8 @@ class DecisionReason(str, Enum):
     STRONG_LEXICAL_EVIDENCE = "STRONG_LEXICAL_EVIDENCE"
     STRONG_VECTOR_EVIDENCE = "STRONG_VECTOR_EVIDENCE"
     COMBINED_EVIDENCE = "COMBINED_EVIDENCE"
+    EXACT_MODEL_EVIDENCE = "EXACT_MODEL_EVIDENCE"
+    FAMILY_COMPATIBLE_EVIDENCE = "FAMILY_COMPATIBLE_EVIDENCE"
     NO_CANDIDATE = "NO_CANDIDATE"
     UNKNOWN_IDENTIFIER = "UNKNOWN_IDENTIFIER"
     WEAK_RETRIEVAL_EVIDENCE = "WEAK_RETRIEVAL_EVIDENCE"
@@ -65,6 +77,9 @@ class RetrievalEvidence:
     effective_mode: str
     decision: str
     reason: str
+    query_identity: dict = field(default_factory=dict)
+    candidate_identity: dict = field(default_factory=dict)
+    identity_relation: str = IdentityRelation.UNKNOWN.value
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -85,7 +100,36 @@ def _metadata_values(documents: list, field: str) -> set[str]:
     }
 
 
+def _document_identifiers(documents: list) -> set[str]:
+    values = _metadata_values(documents, "error_code")
+    for document in documents:
+        content = str(getattr(document, "page_content", "") or "")
+        values.update(match.group(0).casefold() for match in EVIDENCE_IDENTIFIER_PATTERN.finditer(content))
+    return values
+
+
 def _evidence_analysis(query: str, documents: list, base: QueryAnalysis | None) -> QueryAnalysis:
+    base = base or analyze_query(query, documents)
+    identifier = EVIDENCE_IDENTIFIER_PATTERN.search(query or "")
+    model = base.equipment_model
+    if not model and not base.product_series and not base.product_family:
+        model_match = EVIDENCE_MODEL_PATTERN.search(query or "")
+        model = model_match.group(0) if model_match else ""
+    return QueryAnalysis(
+        error_code=identifier.group(0).upper() if identifier else base.error_code,
+        equipment_model=model,
+        manufacturer=base.manufacturer,
+        equipment_type=base.equipment_type,
+        document_type=base.document_type,
+        knowledge_type=base.knowledge_type,
+        product_family=base.product_family,
+        product_series=base.product_series,
+        identity_confidence=base.identity_confidence,
+    )
+
+
+def _legacy_evidence_analysis(query: str, documents: list, base: QueryAnalysis | None) -> QueryAnalysis:
+    """Preserve the V3.1 string-equality behavior for calibration comparisons only."""
     base = base or analyze_query(query, documents)
     identifier = EVIDENCE_IDENTIFIER_PATTERN.search(query or "")
     model = base.equipment_model
@@ -139,27 +183,61 @@ def analyze_retrieval_evidence(
     retrieval_mode: str,
     *,
     policy: EvidencePolicy | None = None,
+    identity_matching: bool = True,
 ) -> RetrievalEvidence:
     """Return an ANSWER/ABSTAIN decision without invoking an LLM."""
     policy = policy or default_policy()
     candidates = list(getattr(result, "candidates", []) or [])
-    analysis = _evidence_analysis(
-        query,
-        documents,
-        getattr(result, "query_analysis", None),
-    )
-    identifiers = _metadata_values(documents, "error_code")
-    models = _metadata_values(documents, "equipment_model")
+    analysis_factory = _evidence_analysis if identity_matching else _legacy_evidence_analysis
+    analysis = analysis_factory(query, documents, getattr(result, "query_analysis", None))
+    identifiers = _document_identifiers(documents)
     top = candidates[0] if candidates else None
     top_metadata = top.metadata if top else {}
+    query_identity = ProductIdentity(
+        manufacturer=analysis.manufacturer,
+        product_family=analysis.product_family,
+        product_series=analysis.product_series,
+        equipment_model=analysis.equipment_model,
+        aliases=((analysis.equipment_model,) if analysis.equipment_model else ()),
+    )
+    candidate_identity = identity_from_metadata(top_metadata)
+    has_query_identity = bool(
+        query_identity.product_family or query_identity.product_series or query_identity.equipment_model
+    )
+    if identity_matching:
+        relation = identity_relation(query_identity, candidate_identity)
+        compatible_identity = identity_is_compatible(query_identity, candidate_identity)
+        known_identity = any(
+            identity_is_compatible(query_identity, identity)
+            for identity in identities_from_documents(documents)
+        ) if has_query_identity else True
+    else:
+        models = _metadata_values(documents, "equipment_model")
+        candidate_model = str(top_metadata.get("equipment_model", ""))
+        exact_legacy_model = bool(
+            analysis.equipment_model
+            and candidate_model.casefold() == analysis.equipment_model.casefold()
+        )
+        relation = (
+            IdentityRelation.EXACT_MODEL
+            if exact_legacy_model
+            else IdentityRelation.MISMATCH if analysis.equipment_model else IdentityRelation.UNKNOWN
+        )
+        compatible_identity = exact_legacy_model if analysis.equipment_model else True
+        known_identity = analysis.equipment_model.casefold() in models if analysis.equipment_model else True
     exact_identifier = bool(
         analysis.error_code
-        and str(top_metadata.get("error_code", "")).lower() == analysis.error_code.lower()
+        and (
+            str(top_metadata.get("error_code", "")).casefold() == analysis.error_code.casefold()
+            or analysis.error_code.casefold() in {
+                match.group(0).casefold()
+                for match in EVIDENCE_IDENTIFIER_PATTERN.finditer(
+                    str(getattr(top.document, "page_content", "") or "") if top else ""
+                )
+            }
+        )
     )
-    exact_model = bool(
-        analysis.equipment_model
-        and str(top_metadata.get("equipment_model", "")).lower() == analysis.equipment_model.lower()
-    )
+    exact_model = relation == IdentityRelation.EXACT_MODEL
     lexical_scores = _candidate_values(candidates, "lexical_score")
     vector_distances = _candidate_values(candidates, "vector_score")
     lexical_margin = _margin(lexical_scores, higher_is_better=True)
@@ -169,26 +247,43 @@ def analyze_retrieval_evidence(
     lexical_score = float(top.lexical_score) if top and top.lexical_score is not None else None
     metadata_consistency = bool(
         (not analysis.error_code or exact_identifier)
-        and (not analysis.equipment_model or exact_model)
+        and (not has_query_identity or compatible_identity)
     )
 
     unsupported_detail = _detail_request_lacks_support(query, candidates)
     if analysis.error_code and analysis.error_code.lower() not in identifiers:
         decision, reason = Decision.ABSTAIN, DecisionReason.UNKNOWN_IDENTIFIER
-    elif analysis.equipment_model and analysis.equipment_model.lower() not in models:
+    elif has_query_identity and not known_identity:
         decision, reason = Decision.ABSTAIN, DecisionReason.MODEL_MISMATCH
     elif not candidates:
         decision, reason = Decision.ABSTAIN, DecisionReason.NO_CANDIDATE
-    elif analysis.equipment_model and not exact_model:
+    elif has_query_identity and not compatible_identity:
         decision, reason = Decision.ABSTAIN, DecisionReason.MODEL_MISMATCH
+    elif analysis.error_code and not exact_identifier:
+        decision, reason = Decision.ABSTAIN, DecisionReason.UNKNOWN_IDENTIFIER
     elif unsupported_detail:
         decision, reason = Decision.ABSTAIN, DecisionReason.INSUFFICIENT_EVIDENCE
     elif exact_identifier:
         decision, reason = Decision.ANSWER, DecisionReason.EXACT_IDENTIFIER_EVIDENCE
     elif vector_distance is not None and vector_distance <= policy.max_vector_distance:
-        decision, reason = Decision.ANSWER, DecisionReason.STRONG_VECTOR_EVIDENCE
-    elif lexical_score is not None and exact_model:
-        decision, reason = Decision.ANSWER, DecisionReason.STRONG_LEXICAL_EVIDENCE
+        if identity_matching and relation == IdentityRelation.EXACT_MODEL:
+            decision, reason = Decision.ANSWER, DecisionReason.EXACT_MODEL_EVIDENCE
+        elif identity_matching and relation in {IdentityRelation.SAME_SERIES, IdentityRelation.SAME_FAMILY}:
+            decision, reason = Decision.ANSWER, DecisionReason.FAMILY_COMPATIBLE_EVIDENCE
+        else:
+            decision, reason = Decision.ANSWER, DecisionReason.STRONG_VECTOR_EVIDENCE
+    elif lexical_score is not None and compatible_identity:
+        if not identity_matching:
+            reason = DecisionReason.STRONG_LEXICAL_EVIDENCE
+            decision = Decision.ANSWER
+        elif relation == IdentityRelation.EXACT_MODEL:
+            reason = DecisionReason.EXACT_MODEL_EVIDENCE
+            decision = Decision.ANSWER
+        elif relation in {IdentityRelation.SAME_SERIES, IdentityRelation.SAME_FAMILY}:
+            reason = DecisionReason.FAMILY_COMPATIBLE_EVIDENCE
+            decision = Decision.ANSWER
+        else:
+            decision, reason = Decision.ABSTAIN, DecisionReason.INSUFFICIENT_EVIDENCE
     elif lexical_score is not None and vector_distance is not None:
         decision, reason = Decision.ABSTAIN, DecisionReason.WEAK_RETRIEVAL_EVIDENCE
     else:
@@ -208,4 +303,7 @@ def analyze_retrieval_evidence(
         effective_mode=retrieval_mode,
         decision=decision.value,
         reason=reason.value,
+        query_identity=query_identity.as_dict(),
+        candidate_identity=candidate_identity.as_dict(),
+        identity_relation=relation.value,
     )

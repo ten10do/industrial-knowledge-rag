@@ -19,6 +19,12 @@ from backend.retrieval.evidence import (
     analyze_retrieval_evidence,
 )
 from backend.retrieval.filters import analyze_query
+from backend.retrieval.product_identity import (
+    IdentityRelation,
+    identity_from_metadata,
+    identity_relation,
+    normalize_identity_text,
+)
 
 
 def _document(*, error_code="", equipment_model="G120", content="G120 F0002 DC link overvoltage"):
@@ -28,8 +34,11 @@ def _document(*, error_code="", equipment_model="G120", content="G120 F0002 DC l
     )
 
 
-def _result(document, *, vector_score=8.0):
-    candidate = RetrievalCandidate(document=document, retrieval_source="vector", vector_score=vector_score, vector_rank=1, final_rank=1)
+def _result(document, *, vector_score=8.0, lexical_score=None):
+    candidate = RetrievalCandidate(
+        document=document, retrieval_source="vector", vector_score=vector_score,
+        lexical_score=lexical_score, vector_rank=1, final_rank=1,
+    )
     return RetrievalResult([candidate], corpus_documents=[document], retrieval_mode="vector")
 
 
@@ -49,6 +58,157 @@ def test_unknown_model_and_unsupported_detail_abstain_without_query_specific_rul
     unsupported = analyze_retrieval_evidence("G120 端子需要多少 N·m 扭矩？", _result(document), [document], "vector")
     assert unknown_model.reason == DecisionReason.MODEL_MISMATCH.value
     assert unsupported.reason == DecisionReason.INSUFFICIENT_EVIDENCE.value
+
+
+def test_product_identity_normalizes_case_spacing_hyphens_and_series_suffix():
+    assert normalize_identity_text("  PowerFlex\u00a0520‑Series ") == "powerflex 520 series"
+    assert normalize_identity_text("powerflex 520-series") == "powerflex 520 series"
+
+
+def test_product_identity_distinguishes_exact_series_family_and_mismatch():
+    series = identity_from_metadata({"manufacturer": "Rockwell", "equipment_model": "PowerFlex 520-series (523/525)"})
+    exact_523 = identity_from_metadata({"manufacturer": "Rockwell", "equipment_model": "PowerFlex 523"})
+    exact_527 = identity_from_metadata({"manufacturer": "Rockwell", "equipment_model": "PowerFlex 527"})
+    exact_5370 = identity_from_metadata({"manufacturer": "Rockwell", "equipment_model": "CompactLogix 5370"})
+    exact_5380 = identity_from_metadata({"manufacturer": "Rockwell", "equipment_model": "CompactLogix 5380"})
+    unknown = identity_from_metadata({})
+
+    assert identity_relation(exact_523, series) == IdentityRelation.EXACT_MODEL
+    assert identity_relation(series, exact_523) == IdentityRelation.SAME_SERIES
+    assert identity_relation(exact_527, series) == IdentityRelation.SAME_FAMILY
+    assert identity_relation(exact_5370, exact_5380) == IdentityRelation.SAME_FAMILY
+    assert identity_relation(exact_5370, identity_from_metadata({"equipment_model": "S7-1200"})) == IdentityRelation.MISMATCH
+    assert identity_relation(unknown, series) == IdentityRelation.UNKNOWN
+
+
+def test_query_analysis_separates_family_series_and_exact_model():
+    documents = [
+        _document(equipment_model="PowerFlex 520-series (523/525)"),
+        _document(equipment_model="PowerFlex 527"),
+    ]
+    family = analyze_query("PowerFlex 520 系列如何安全断电？", documents)
+    exact = analyze_query("PowerFlex 527 如何配置网络？", documents)
+
+    assert family.product_family == "PowerFlex"
+    assert family.product_series == "PowerFlex 520"
+    assert family.equipment_model == ""
+    assert exact.product_family == "PowerFlex"
+    assert exact.product_series == ""
+    assert exact.equipment_model == "PowerFlex 527"
+
+
+def test_query_analysis_uses_first_product_as_target_in_cross_model_question():
+    documents = [
+        _document(equipment_model="PowerFlex 520-series (523/525)"),
+        _document(equipment_model="PowerFlex 527"),
+    ]
+    analysis = analyze_query("PowerFlex 527 能直接使用 PowerFlex 520 的 C121 吗？", documents)
+    assert analysis.equipment_model == "PowerFlex 527"
+
+
+def test_series_evidence_answers_but_nearby_and_unknown_exact_models_abstain():
+    series_document = _document(
+        equipment_model="PowerFlex 520-series (523/525)",
+        content="PowerFlex 520-series disconnect power and verify DC bus voltage before service.",
+    )
+    series = analyze_retrieval_evidence(
+        "PowerFlex 520 断电后如何确认直流母线无电？",
+        _result(series_document),
+        [series_document],
+        "vector",
+    )
+    nearby = analyze_retrieval_evidence(
+        "PowerFlex 527 断电后如何确认直流母线无电？",
+        _result(series_document),
+        [series_document],
+        "vector",
+    )
+    unknown = analyze_retrieval_evidence(
+        "PowerFlex 755 的参数是什么？",
+        _result(series_document),
+        [series_document],
+        "vector",
+    )
+
+    assert series.decision == "ANSWER"
+    assert series.identity_relation == IdentityRelation.SAME_SERIES.value
+    assert nearby.decision == "ABSTAIN"
+    assert nearby.reason == DecisionReason.MODEL_MISMATCH.value
+    assert unknown.decision == "ABSTAIN"
+    assert unknown.reason == DecisionReason.MODEL_MISMATCH.value
+
+
+def test_identifier_in_candidate_text_is_known_while_unknown_s_code_abstains():
+    document = _document(
+        equipment_model="PowerFlex 527",
+        content="PowerFlex 527 fault table: FLT S03 indicates motor overspeed.",
+    )
+    known = analyze_retrieval_evidence("PowerFlex 527 的 S03 是什么？", _result(document), [document], "vector")
+    unknown = analyze_retrieval_evidence("PowerFlex 527 的 S98 是什么？", _result(document), [document], "vector")
+    assert known.decision == "ANSWER"
+    assert known.reason == DecisionReason.EXACT_IDENTIFIER_EVIDENCE.value
+    assert unknown.decision == "ABSTAIN"
+    assert unknown.reason == DecisionReason.UNKNOWN_IDENTIFIER.value
+
+
+def test_evidence_identifier_expansion_does_not_change_retrieval_query_filtering():
+    document = _document(
+        equipment_model="PowerFlex 527",
+        content="PowerFlex 527 fault table: FLT S03 indicates motor overspeed.",
+    )
+    assert analyze_query("PowerFlex 527 的 S03 是什么？", [document]).error_code == ""
+    assert analyze_retrieval_evidence(
+        "PowerFlex 527 的 S03 是什么？", _result(document), [document], "vector",
+    ).reason == DecisionReason.EXACT_IDENTIFIER_EVIDENCE.value
+
+
+def test_identifier_known_only_on_another_model_does_not_authorize_answer():
+    target = _document(
+        equipment_model="PowerFlex 527",
+        content="PowerFlex 527 EtherNet/IP configuration.",
+    )
+    other = _document(
+        equipment_model="PowerFlex 520-series (523/525)",
+        content="C121 configures communication writes for PowerFlex 520-series.",
+    )
+    evidence = analyze_retrieval_evidence(
+        "PowerFlex 527 可以使用 C121 吗？",
+        _result(target),
+        [target, other],
+        "vector",
+    )
+    assert evidence.decision == "ABSTAIN"
+    assert evidence.reason == DecisionReason.UNKNOWN_IDENTIFIER.value
+
+
+def test_unsupported_protocol_and_replacement_details_remain_protected():
+    document = _document(
+        equipment_model="PowerFlex 527",
+        content="PowerFlex 527 supports EtherNet/IP commissioning and ordinary preventive inspection.",
+    )
+    station = analyze_retrieval_evidence(
+        "PowerFlex 527 的 PROFINET station name 怎么设置？", _result(document), [document], "vector",
+    )
+    replacement = analyze_retrieval_evidence(
+        "PowerFlex 527 主板电容的预防性更换周期是什么？", _result(document), [document], "vector",
+    )
+    assert station.decision == "ABSTAIN"
+    assert station.reason == DecisionReason.INSUFFICIENT_EVIDENCE.value
+    assert replacement.decision == "ABSTAIN"
+    assert replacement.reason == DecisionReason.INSUFFICIENT_EVIDENCE.value
+
+
+def test_lexical_only_evidence_without_product_identity_does_not_claim_family_support():
+    document = _document(equipment_model="CompactLogix 5380", content="Duplicate IP recovery guidance.")
+    evidence = analyze_retrieval_evidence(
+        "两台 5380 地址冲突后怎样恢复？",
+        _result(document, vector_score=None, lexical_score=4.0),
+        [document],
+        "hybrid",
+    )
+    assert evidence.identity_relation == IdentityRelation.UNKNOWN.value
+    assert evidence.decision == "ABSTAIN"
+    assert evidence.reason == DecisionReason.INSUFFICIENT_EVIDENCE.value
 
 
 def test_ordinary_versions_are_not_industrial_identifiers():

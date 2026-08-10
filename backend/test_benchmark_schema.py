@@ -13,6 +13,8 @@ from backend.evaluation.private_benchmark import (
     _resolve_local_file,
     _rerank_analysis,
     annotation_hash,
+    calibration_hash,
+    load_private_calibration,
     load_private_manifest,
 )
 
@@ -159,6 +161,35 @@ def test_private_candidate_rows_include_citation_metadata():
         "page": 12, "section": "Setup", "equipment_model": "", "error_code": "",
         "vector_distance": 0.1, "lexical_score": 0.2, "pre_rerank_rank": 1, "rerank_rank": 1,
     }
+
+
+def test_private_calibration_is_independent_sized_and_frozen(tmp_path):
+    manifest = _private_manifest()
+    manifest["freeze"] = {"annotation_sha256": annotation_hash(manifest)}
+    calibration = {
+        "name": "v3.2-test",
+        "corpus_annotation_sha256": annotation_hash(manifest),
+        "freeze": {},
+        "queries": [
+            {
+                "query_id": f"c{index:02d}",
+                "query": f"Independent calibration question {index}",
+                "category": "procedure" if index < 12 else "ood",
+                "answerable": index < 12,
+                "relevant_chunk_ids": ["chunk-a"] if index < 12 else [],
+                "expected_model": "Drive-A",
+                "expected_error_code": "",
+                "ood_type": "" if index < 12 else "unknown_model",
+            }
+            for index in range(20)
+        ],
+    }
+    calibration["freeze"]["calibration_sha256"] = calibration_hash(calibration)
+    path = tmp_path / "calibration.json"
+    path.write_text(__import__("json").dumps(calibration), encoding="utf-8")
+    loaded = load_private_calibration(path, manifest, {"chunk-a"})
+    assert len(loaded["queries"]) == 20
+    assert calibration_hash(loaded) == calibration["freeze"]["calibration_sha256"]
 
 
 def test_synthetic_runner_is_deterministic():
