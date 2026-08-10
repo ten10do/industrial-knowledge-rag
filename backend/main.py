@@ -49,6 +49,7 @@ if __package__:
         snapshot_is_compatible,
     )
     from .security import create_rate_limiter, require_admin_token
+    from .retrieval import get_reranker
     from .task_queue import create_job_id, create_task_queue
     from .version_sync import PublicVersionSynchronizer
     from .version_store import (
@@ -85,6 +86,7 @@ else:
         snapshot_is_compatible,
     )
     from security import create_rate_limiter, require_admin_token
+    from retrieval import get_reranker
     from task_queue import create_job_id, create_task_queue
     from version_sync import PublicVersionSynchronizer
     from version_store import (
@@ -153,6 +155,7 @@ analyze_evidence = rag_backend.analyze_evidence
 get_data_dir = rag_backend.get_data_dir
 get_index_storage_path = rag_backend.get_index_storage_path
 reload_knowledge_base = rag_backend.reload_knowledge_base
+reranker = get_reranker()
 
 
 ModelProvider = Literal["Groq", "DeepSeek"]
@@ -359,6 +362,9 @@ class SourceItem(BaseModel):
     vector_score: float | None = None
     fusion_score: float | None = None
     final_rank: int | None = None
+    pre_rerank_rank: int | None = None
+    rerank_score: float | None = None
+    rerank_rank: int | None = None
 
 
 class AskResponse(BaseModel):
@@ -366,6 +372,7 @@ class AskResponse(BaseModel):
     sources: list[SourceItem]
     is_refused: bool
     evidence: dict | None = None
+    reranker: dict | None = None
     conversation_context: ConversationContext | None = None
 
 
@@ -1331,6 +1338,9 @@ def serialize_sources(docs):
                 vector_score=(candidate.vector_score if candidate else None),
                 fusion_score=(candidate.fusion_score if candidate else None),
                 final_rank=(candidate.final_rank if candidate else None),
+                pre_rerank_rank=(candidate.pre_rerank_rank if candidate else None),
+                rerank_score=(candidate.rerank_score if candidate else None),
+                rerank_rank=(candidate.rerank_rank if candidate else None),
             )
         )
 
@@ -1512,7 +1522,7 @@ def ask(
         )
         with get_knowledge_base_lock(knowledge_base_id):
             retrieval_arguments = {
-                "k": request.top_k,
+                "k": reranker.retrieval_k(request.top_k),
                 "knowledge_base_id": knowledge_base_id,
             }
             if request.retrieval_mode:
@@ -1529,11 +1539,22 @@ def ask(
                 request.retrieval_mode,
             )
             if evidence.decision == "ABSTAIN":
+                reranker_status = None
+                if reranker.requested:
+                    reranker_status = {
+                        "reranker_requested": True,
+                        "reranker_effective": False,
+                        "reranker_fallback_reason": "Evidence decision ABSTAIN; reranker skipped.",
+                        "model": reranker.config.model_name,
+                        "candidate_count": len(raw_docs.candidates),
+                        "output_count": 0,
+                    }
                 return AskResponse(
                     answer=REFUSAL_MESSAGE,
                     sources=[],
                     is_refused=True,
                     evidence=evidence.as_dict(),
+                    reranker=reranker_status,
                     conversation_context=context_metadata,
                 )
         if not has_relevant_docs(docs):
@@ -1544,6 +1565,17 @@ def ask(
                 evidence=evidence.as_dict() if evidence else None,
                 conversation_context=context_metadata,
             )
+
+        reranker_status = None
+        if reranker.requested:
+            rerank_outcome = reranker.rerank(
+                context_result.standalone_query,
+                docs,
+                top_k=min(request.top_k, reranker.config.top_k),
+            )
+            docs = rerank_outcome.result
+            sources = serialize_sources(docs)
+            reranker_status = rerank_outcome.status()
 
         if request.history:
             answer = generate_answer(
@@ -1566,6 +1598,7 @@ def ask(
             sources=sources,
             is_refused=False,
             evidence=evidence.as_dict() if evidence else None,
+            reranker=reranker_status,
             conversation_context=context_metadata,
         )
     except ModelGovernanceError as exc:

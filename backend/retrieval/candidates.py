@@ -13,6 +13,9 @@ class RetrievalCandidate:
     vector_score: float | None = None
     fusion_score: float | None = None
     final_rank: int | None = None
+    pre_rerank_rank: int | None = None
+    rerank_score: float | None = None
+    rerank_rank: int | None = None
     evidence_score: float = 0.0
     exact_metadata_match: bool = False
 

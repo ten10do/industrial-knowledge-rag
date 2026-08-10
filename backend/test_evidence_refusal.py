@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import patch
+from unittest.mock import Mock
 
 from backend import main
 from fastapi.testclient import TestClient
@@ -83,16 +84,23 @@ def test_api_abstain_skips_llm_and_omits_citations():
         retrieval_mode="vector", effective_mode="vector", decision="ABSTAIN",
         reason="INSUFFICIENT_EVIDENCE",
     )
-    with patch("backend.main.retrieve_docs", return_value=result):
-        with patch("backend.main.filter_relevant_docs", return_value=result):
-            with patch("backend.main.analyze_evidence", return_value=evidence):
-                with patch("backend.main.generate_answer") as generate:
-                    response = TestClient(
-                        main.app,
-                        headers={"X-Knowledge-Base-ID": "kb-evidence-test-00000001"},
-                    ).post("/ask", json={"question": "G120 端子扭矩是多少？"})
+    service = Mock()
+    service.requested = True
+    service.config.model_name = "test-reranker"
+    service.retrieval_k.side_effect = lambda value: value
+    with patch("backend.main.reranker", service):
+        with patch("backend.main.retrieve_docs", return_value=result):
+            with patch("backend.main.filter_relevant_docs", return_value=result):
+                with patch("backend.main.analyze_evidence", return_value=evidence):
+                    with patch("backend.main.generate_answer") as generate:
+                        response = TestClient(
+                            main.app,
+                            headers={"X-Knowledge-Base-ID": "kb-evidence-test-00000001"},
+                        ).post("/ask", json={"question": "G120 端子扭矩是多少？"})
     assert response.status_code == 200
     assert response.json()["is_refused"] is True
     assert response.json()["sources"] == []
     assert response.json()["evidence"]["reason"] == "INSUFFICIENT_EVIDENCE"
+    assert response.json()["reranker"]["reranker_effective"] is False
+    service.rerank.assert_not_called()
     generate.assert_not_called()

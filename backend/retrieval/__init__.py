@@ -3,6 +3,7 @@ from .candidates import RetrievalCandidate, RetrievalResult
 from .filters import analyze_query, filter_documents
 from .fusion import rrf_fuse
 from .evidence import Decision, DecisionReason, EvidencePolicy, RetrievalEvidence, analyze_retrieval_evidence
+from .reranker import CrossEncoderReranker, RerankerConfig, RerankOutcome, get_reranker
 
 __all__ = [
     "BM25Index",
@@ -16,4 +17,8 @@ __all__ = [
     "EvidencePolicy",
     "RetrievalEvidence",
     "analyze_retrieval_evidence",
+    "CrossEncoderReranker",
+    "RerankerConfig",
+    "RerankOutcome",
+    "get_reranker",
 ]

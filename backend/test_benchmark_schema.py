@@ -5,7 +5,7 @@ from copy import deepcopy
 import pytest
 
 from backend.evaluation.benchmark_runner import CHALLENGE_PATH, run_dataset
-from backend.evaluation.benchmark_schema import FAILURE_TYPES, evaluate_rows, load_manifest
+from backend.evaluation.benchmark_schema import FAILURE_TYPES, classify_failure, evaluate_rows, load_manifest
 
 
 def test_challenge_manifest_has_required_coverage():
@@ -54,6 +54,20 @@ def test_metrics_ranking_gap_and_failure_taxonomy():
     assert report["failure_summary"]["RANKING_FAILURE"] == 1
     assert report["failure_summary"]["OOD_FALSE_POSITIVE"] == 1
     assert set(report["failure_summary"]) == set(FAILURE_TYPES)
+
+
+def test_specific_confusion_is_mutually_exclusive_with_generic_recall_failure():
+    query = {
+        "query_id": "comparison", "answerable": True, "category": "comparison",
+        "query_type": "comparison", "expected_error_code": "",
+        "expected_equipment_model": "G120C", "expected_section": "Commissioning",
+        "relevant_chunk_ids": ["G120C-STARTUP"],
+    }
+    row = {
+        "query_id": "comparison", "rank": None, "refused": False,
+        "candidates": [{"chunk_id": "G120-STARTUP", "equipment_model": "G120", "section": "Commissioning"}],
+    }
+    assert classify_failure(query, row) == "MODEL_CONFUSION"
 
 
 def test_private_dataset_is_optional_and_ignored():

@@ -198,3 +198,30 @@ The calibrated evidence benchmark is separate from the frozen V2.6 challenge que
 ```powershell
 .\venv\Scripts\python.exe -m backend.evaluation.evidence_benchmark
 ```
+
+## V3 Cross-Encoder Reranking
+
+V3 implements an **experimental, configuration-gated** local Cross-Encoder after the V2.7 evidence decision:
+
+```text
+BM25 + Dense / Dense-only candidates
+  -> RRF (hybrid only)
+  -> Evidence Gate
+     -> ABSTAIN: skip reranker and LLM
+     -> ANSWER: Cross-Encoder rerank
+  -> Final context
+  -> LLM + citations
+```
+
+The selected baseline is `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`: a roughly 0.1B-parameter, 15-language Apache-2.0 model that runs through the existing Sentence Transformers stack on CPU. Model weights stay in the local HuggingFace cache and are not committed. Reranker logits only determine candidate order; they are never treated as evidence or answerability probability.
+
+`RERANK_ENABLED=false` remains the default. The frozen challenge experiment selected Hybrid candidate retrieval with `RERANK_CANDIDATE_K=5` and `RERANK_TOP_K=3`; Top-10 did not improve candidate recall and cost more CPU latency. Challenge verification does not establish production accuracy, so production enablement remains pending private real-corpus validation. Model-load or inference failures preserve original candidate order and appear in the `/ask` response reranker status.
+
+V2.6 comparison semantics are intentionally target-specific: q13, q15, and q27 each label one target-model chunk, not a multi-document comparison set. `Recall@5=0` means those target chunks were absent from Top-5. Failure taxonomy is mutually exclusive and more specific metadata confusions (`MODEL_CONFUSION` / `IDENTIFIER_CONFUSION`) take precedence over generic `RECALL_FAILURE`; therefore zero comparison recall and zero generic recall failures are consistent.
+
+Run the real benchmark and optional smoke gate:
+
+```powershell
+.\venv\Scripts\python.exe -m backend.evaluation.reranker_benchmark
+$env:RUN_REAL_RERANKER_SMOKE="1"; .\venv\Scripts\python.exe -m pytest backend\test_reranker_smoke.py
+```
