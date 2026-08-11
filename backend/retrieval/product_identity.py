@@ -106,6 +106,72 @@ def identities_from_documents(documents: list) -> list[ProductIdentity]:
     return list(identities.values())
 
 
+def _bare_model_token(identity: ProductIdentity) -> str:
+    """Return a safe standalone model token for corpus-unique resolution."""
+    if identity.product_series:
+        return ""
+    match = MODEL_SUFFIX_PATTERN.match(identity.equipment_model)
+    return match.group("model") if match else ""
+
+
+def identities_from_query(
+    query: str,
+    documents: list,
+    *,
+    corpus_identities: list[ProductIdentity] | None = None,
+) -> tuple[ProductIdentity, ...]:
+    """Resolve every explicitly mentioned known identity, including comparisons."""
+    identities = corpus_identities if corpus_identities is not None else identities_from_documents(documents)
+    matches: list[tuple[int, int, ProductIdentity]] = []
+    for identity in identities:
+        aliases = {identity.equipment_model, *identity.aliases} - {""}
+        # A family-level manual may use the family name as its metadata model.
+        # It establishes family scope, but must not turn an unknown sibling
+        # model mentioned in the query into an exact-model match.
+        if (
+            not identity.product_series
+            and normalize_identity_text(identity.equipment_model)
+            == normalize_identity_text(identity.product_family)
+        ):
+            aliases = set()
+        if identity.product_series:
+            series_aliases = {
+                normalize_identity_text(identity.product_series),
+                normalize_identity_text(f"{identity.product_series} series"),
+                normalize_identity_text(identity.equipment_model),
+            }
+            aliases = {
+                alias for alias in aliases
+                if normalize_identity_text(alias) not in series_aliases
+            }
+        aliases = sorted(
+            aliases,
+            key=lambda value: -len(normalize_identity_text(value)),
+        )
+        for alias in aliases:
+            position = _mention_position(query, alias)
+            if position is not None:
+                matches.append((position, -len(normalize_identity_text(alias)), identity))
+                break
+
+    bare_tokens: dict[str, list[ProductIdentity]] = {}
+    for identity in identities:
+        if token := normalize_identity_text(_bare_model_token(identity)):
+            bare_tokens.setdefault(token, []).append(identity)
+    for token, token_identities in bare_tokens.items():
+        if len(token_identities) != 1 or any(item[2] == token_identities[0] for item in matches):
+            continue
+        position = _mention_position(query, token)
+        if position is not None:
+            matches.append((position, -len(token), token_identities[0]))
+
+    ordered: list[ProductIdentity] = []
+    for _, _, identity in sorted(matches, key=lambda item: (item[0], item[1])):
+        if identity not in ordered:
+            ordered.append(identity)
+    return tuple(ordered)
+
+
 def _mentioned(query: str, value: str) -> bool:
     normalized_query = f" {normalize_identity_text(query)} "
     normalized_value = normalize_identity_text(value)
@@ -121,11 +187,32 @@ def _mention_position(query: str, value: str) -> int | None:
     return match.start() if match else None
 
 
-def identity_from_query(query: str, documents: list) -> tuple[ProductIdentity, str]:
-    identities = identities_from_documents(documents)
+def identity_from_query(
+    query: str,
+    documents: list,
+    *,
+    corpus_identities: list[ProductIdentity] | None = None,
+    explicit_identities: tuple[ProductIdentity, ...] | None = None,
+) -> tuple[ProductIdentity, str]:
+    identities = corpus_identities if corpus_identities is not None else identities_from_documents(documents)
     normalized_query = normalize_identity_text(query)
     manufacturers = [item.manufacturer for item in identities if item.manufacturer]
     manufacturer = next((value for value in manufacturers if _mentioned(query, value)), "")
+
+    explicit_identities = (
+        explicit_identities
+        if explicit_identities is not None
+        else identities_from_query(query, documents, corpus_identities=identities)
+    )
+    if explicit_identities:
+        identity = explicit_identities[0]
+        return ProductIdentity(
+            manufacturer or identity.manufacturer,
+            identity.product_family,
+            identity.product_series,
+            identity.equipment_model,
+            identity.aliases,
+        ), "EXACT_MODEL"
 
     matches = []
     for identity in identities:
@@ -141,6 +228,8 @@ def identity_from_query(query: str, documents: list) -> tuple[ProductIdentity, s
             exact_aliases = [alias for alias in identity.aliases if normalize_identity_text(alias) not in series_aliases]
         else:
             exact_aliases = list(identity.aliases)
+            if normalize_identity_text(identity.equipment_model) == normalize_identity_text(identity.product_family):
+                exact_aliases = []
         for alias in exact_aliases:
             if (position := _mention_position(query, alias)) is not None:
                 matches.append((position, 0, -len(normalize_identity_text(alias)), alias, identity))

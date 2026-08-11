@@ -3,14 +3,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .product_identity import identity_from_query
+from .product_identity import ProductIdentity, identities_from_documents, identities_from_query, identity_from_query
 
 
 IDENTIFIER_PATTERN = re.compile(
-    r"(?<![a-z0-9])(?:0x[0-9a-f]+|[fae]\d{2,5})(?![a-z0-9])", re.IGNORECASE
-)
-MODEL_PATTERN = re.compile(
-    r"\b(?:[a-z]+\d*(?:-[a-z0-9]+)+|[a-z]+\s+g\d+)\b", re.IGNORECASE
+    r"(?<![a-z0-9])(?:0x[0-9a-f]+|[faceps]\d{2,5}|mw\d{1,5}|4\d{4})(?![a-z0-9])",
+    re.IGNORECASE,
 )
 
 
@@ -25,6 +23,8 @@ class QueryAnalysis:
     product_family: str = ""
     product_series: str = ""
     identity_confidence: str = "UNKNOWN"
+    identifiers: tuple[str, ...] = ()
+    product_identities: tuple[ProductIdentity, ...] = ()
 
 
 def _values(documents: list, key: str) -> dict[str, str]:
@@ -38,7 +38,7 @@ def _values(documents: list, key: str) -> dict[str, str]:
 
 def analyze_query(query: str, documents: list) -> QueryAnalysis:
     normalized = (query or "").lower()
-    codes = IDENTIFIER_PATTERN.findall(query or "")
+    codes = tuple(dict.fromkeys(match.upper() for match in IDENTIFIER_PATTERN.findall(query or "")))
     models = _values(documents, "equipment_model")
     manufacturers = _values(documents, "manufacturer")
     equipment_types = _values(documents, "equipment_type")
@@ -48,11 +48,17 @@ def analyze_query(query: str, documents: list) -> QueryAnalysis:
     def mentioned(values: dict[str, str]) -> str:
         return next((original for value, original in values.items() if value in normalized), "")
 
-    identity, identity_confidence = identity_from_query(query, documents)
+    corpus_identities = identities_from_documents(documents)
+    product_identities = identities_from_query(
+        query, documents, corpus_identities=corpus_identities,
+    )
+    identity, identity_confidence = identity_from_query(
+        query,
+        documents,
+        corpus_identities=corpus_identities,
+        explicit_identities=product_identities,
+    )
     model = identity.equipment_model or mentioned(models)
-    if not model:
-        model_match = MODEL_PATTERN.search(query or "")
-        model = model_match.group(0) if model_match else ""
     return QueryAnalysis(
         error_code=(codes[0].upper() if codes else ""),
         equipment_model=model,
@@ -63,6 +69,8 @@ def analyze_query(query: str, documents: list) -> QueryAnalysis:
         product_family=identity.product_family,
         product_series=identity.product_series,
         identity_confidence=identity_confidence,
+        identifiers=codes,
+        product_identities=product_identities,
     )
 
 

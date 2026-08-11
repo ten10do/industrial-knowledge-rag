@@ -12,13 +12,13 @@ if __package__:
     from .ingestion import PageText, ingest_pages
     from .learning_content import generate_hierarchical_learning_content
     from .llm_client import generate_llm_answer
-    from .retrieval import BM25Index, RetrievalCandidate, RetrievalResult, analyze_query, analyze_retrieval_evidence, filter_documents, rrf_fuse
+    from .retrieval import BM25Index, RetrievalCandidate, RetrievalResult, analyze_query, analyze_retrieval_evidence, build_retrieval_scope, collect_scoped_candidates, rrf_fuse
     from .retrieval.filters import has_exact_metadata_match
 else:
     from ingestion import PageText, ingest_pages
     from learning_content import generate_hierarchical_learning_content
     from llm_client import generate_llm_answer
-    from retrieval import BM25Index, RetrievalCandidate, RetrievalResult, analyze_query, analyze_retrieval_evidence, filter_documents, rrf_fuse
+    from retrieval import BM25Index, RetrievalCandidate, RetrievalResult, analyze_query, analyze_retrieval_evidence, build_retrieval_scope, collect_scoped_candidates, rrf_fuse
     from retrieval.filters import has_exact_metadata_match
 
 
@@ -385,30 +385,33 @@ def retrieve_docs(
     index = _knowledge_bases[knowledge_base_id]
     analysis = analyze_query(question, index.documents)
     mode = get_retrieval_mode(retrieval_mode)
-    documents, filter_applied = filter_documents(index.documents, analysis)
-    if analysis.error_code and not filter_applied:
+    scope = build_retrieval_scope(question, index.documents, analysis)
+    if analysis.identifiers and not scope.identifier_found:
         return RetrievalResult(
             [], query_analysis=analysis, corpus_documents=index.documents,
-            retrieval_mode=mode,
+            retrieval_mode=mode, scope_decision=scope,
         )
-    if documents is not index.documents:
-        filtered_index = _fit_index(documents)
-    else:
-        filtered_index = index
-    lexical = _lexical_candidates(
-        filtered_index,
-        question,
-        documents,
-        analysis,
+    def scoped_index(documents):
+        return index if len(documents) == len(index.documents) else _fit_index(documents)
+
+    lexical = collect_scoped_candidates(
+        scope,
         _positive_int("LEXICAL_TOP_K", DEFAULT_LEXICAL_TOP_K),
+        lambda documents, limit: _lexical_candidates(
+            scoped_index(documents), question, documents, analysis, limit,
+        ),
     )
-    vector = _tfidf_candidates(
-        filtered_index,
-        question,
-        documents,
-        analysis,
+    vector = collect_scoped_candidates(
+        scope,
         _positive_int("VECTOR_TOP_K", DEFAULT_VECTOR_TOP_K),
+        lambda documents, limit: _tfidf_candidates(
+            scoped_index(documents), question, documents, analysis, limit,
+        ),
     )
+    for rank, candidate in enumerate(lexical, start=1):
+        candidate.lexical_rank = rank
+    for rank, candidate in enumerate(vector, start=1):
+        candidate.vector_rank = rank
     if mode == "lexical":
         candidates = lexical[:k]
     elif mode == "vector":
@@ -424,7 +427,7 @@ def retrieve_docs(
         candidate.final_rank = rank
     return RetrievalResult(
         candidates, query_analysis=analysis, corpus_documents=index.documents,
-        retrieval_mode=mode,
+        retrieval_mode=mode, scope_decision=scope,
     )
 
 
@@ -473,7 +476,13 @@ def filter_relevant_docs(scored_docs):
                 and candidate.lexical_score > 0
             )
         ]
-        return RetrievalResult(relevant)
+        return RetrievalResult(
+            relevant,
+            query_analysis=getattr(scored_docs, "query_analysis", None),
+            corpus_documents=getattr(scored_docs, "corpus_documents", []),
+            retrieval_mode=getattr(scored_docs, "retrieval_mode", ""),
+            scope_decision=getattr(scored_docs, "scope_decision", None),
+        )
     threshold = get_relevance_threshold()
     return [
         (document, score)

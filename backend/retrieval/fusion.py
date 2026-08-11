@@ -29,6 +29,9 @@ def rrf_fuse(
                     vector_score=candidate.vector_score,
                     evidence_score=candidate.evidence_score,
                     exact_metadata_match=candidate.exact_metadata_match,
+                    identity_relation=candidate.identity_relation,
+                    scope_match=candidate.scope_match,
+                    scope_level=candidate.scope_level,
                 )
                 merged[key] = current
             elif source == "vector":
@@ -36,12 +39,21 @@ def rrf_fuse(
                 current.vector_score = candidate.vector_score
                 current.evidence_score = candidate.evidence_score
                 current.exact_metadata_match |= candidate.exact_metadata_match
+                if candidate.scope_match == "primary":
+                    current.scope_match = candidate.scope_match
+                    current.scope_level = candidate.scope_level
+                if current.identity_relation == "UNKNOWN":
+                    current.identity_relation = candidate.identity_relation
             current.fusion_score = (current.fusion_score or 0.0) + 1.0 / (rrf_k + rank)
             if source not in current.retrieval_source.split("+"):
                 current.retrieval_source = "+".join(sorted((*current.retrieval_source.split("+"), source)))
     ranked = sorted(
         merged.values(),
-        key=lambda item: (-(item.fusion_score or 0.0), item.chunk_id),
+        key=lambda item: (
+            {"primary": 0, "none": 1, "fallback": 2}.get(item.scope_match, 1),
+            -(item.fusion_score or 0.0),
+            item.chunk_id,
+        ),
     )[:top_k]
     for rank, candidate in enumerate(ranked, start=1):
         candidate.final_rank = rank

@@ -137,6 +137,7 @@ class CrossEncoderReranker:
                 query_analysis=getattr(result, "query_analysis", None),
                 corpus_documents=getattr(result, "corpus_documents", []),
                 retrieval_mode=getattr(result, "retrieval_mode", ""),
+                scope_decision=getattr(result, "scope_decision", None),
             )
 
         if not self.requested:

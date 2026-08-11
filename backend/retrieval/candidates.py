@@ -18,6 +18,9 @@ class RetrievalCandidate:
     rerank_rank: int | None = None
     evidence_score: float = 0.0
     exact_metadata_match: bool = False
+    identity_relation: str = "UNKNOWN"
+    scope_match: str = "none"
+    scope_level: str = "GLOBAL_SCOPE"
 
     @property
     def metadata(self) -> dict:
@@ -38,9 +41,11 @@ class RetrievalResult(list):
         query_analysis=None,
         corpus_documents: list | None = None,
         retrieval_mode: str = "",
+        scope_decision=None,
     ):
         self.candidates = candidates
         self.query_analysis = query_analysis
         self.corpus_documents = corpus_documents or []
         self.retrieval_mode = retrieval_mode
+        self.scope_decision = scope_decision
         super().__init__((candidate.document, candidate.evidence_score) for candidate in candidates)

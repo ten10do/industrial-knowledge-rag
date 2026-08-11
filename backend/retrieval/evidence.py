@@ -125,6 +125,8 @@ def _evidence_analysis(query: str, documents: list, base: QueryAnalysis | None) 
         product_family=base.product_family,
         product_series=base.product_series,
         identity_confidence=base.identity_confidence,
+        identifiers=base.identifiers,
+        product_identities=base.product_identities,
     )
 
 
@@ -143,6 +145,8 @@ def _legacy_evidence_analysis(query: str, documents: list, base: QueryAnalysis |
         equipment_type=base.equipment_type,
         document_type=base.document_type,
         knowledge_type=base.knowledge_type,
+        identifiers=base.identifiers,
+        product_identities=base.product_identities,
     )
 
 
@@ -201,15 +205,32 @@ def analyze_retrieval_evidence(
         aliases=((analysis.equipment_model,) if analysis.equipment_model else ()),
     )
     candidate_identity = identity_from_metadata(top_metadata)
-    has_query_identity = bool(
-        query_identity.product_family or query_identity.product_series or query_identity.equipment_model
+    query_identities = analysis.product_identities or (query_identity,)
+    has_query_identity = any(
+        identity.product_family or identity.product_series or identity.equipment_model
+        for identity in query_identities
     )
     if identity_matching:
-        relation = identity_relation(query_identity, candidate_identity)
-        compatible_identity = identity_is_compatible(query_identity, candidate_identity)
-        known_identity = any(
-            identity_is_compatible(query_identity, identity)
-            for identity in identities_from_documents(documents)
+        relations = {identity_relation(identity, candidate_identity) for identity in query_identities}
+        relation = next(
+            (
+                value for value in (
+                    IdentityRelation.EXACT_MODEL,
+                    IdentityRelation.SAME_SERIES,
+                    IdentityRelation.SAME_FAMILY,
+                    IdentityRelation.MISMATCH,
+                )
+                if value in relations
+            ),
+            IdentityRelation.UNKNOWN,
+        )
+        compatible_identity = any(
+            identity_is_compatible(identity, candidate_identity) for identity in query_identities
+        )
+        corpus_identities = identities_from_documents(documents)
+        known_identity = all(
+            any(identity_is_compatible(query_item, candidate_item) for candidate_item in corpus_identities)
+            for query_item in query_identities
         ) if has_query_identity else True
     else:
         models = _metadata_values(documents, "equipment_model")
@@ -303,7 +324,10 @@ def analyze_retrieval_evidence(
         effective_mode=retrieval_mode,
         decision=decision.value,
         reason=reason.value,
-        query_identity=query_identity.as_dict(),
+        query_identity=(
+            {"identities": [identity.as_dict() for identity in query_identities]}
+            if len(query_identities) > 1 else query_identity.as_dict()
+        ),
         candidate_identity=candidate_identity.as_dict(),
         identity_relation=relation.value,
     )

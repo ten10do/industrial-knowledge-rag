@@ -151,12 +151,12 @@ def test_identifier_in_candidate_text_is_known_while_unknown_s_code_abstains():
     assert unknown.reason == DecisionReason.UNKNOWN_IDENTIFIER.value
 
 
-def test_evidence_identifier_expansion_does_not_change_retrieval_query_filtering():
+def test_identifier_expansion_is_shared_with_retrieval_query_analysis():
     document = _document(
         equipment_model="PowerFlex 527",
         content="PowerFlex 527 fault table: FLT S03 indicates motor overspeed.",
     )
-    assert analyze_query("PowerFlex 527 的 S03 是什么？", [document]).error_code == ""
+    assert analyze_query("PowerFlex 527 的 S03 是什么？", [document]).error_code == "S03"
     assert analyze_retrieval_evidence(
         "PowerFlex 527 的 S03 是什么？", _result(document), [document], "vector",
     ).reason == DecisionReason.EXACT_IDENTIFIER_EVIDENCE.value
@@ -198,7 +198,7 @@ def test_unsupported_protocol_and_replacement_details_remain_protected():
     assert replacement.reason == DecisionReason.INSUFFICIENT_EVIDENCE.value
 
 
-def test_lexical_only_evidence_without_product_identity_does_not_claim_family_support():
+def test_unique_bare_model_can_claim_exact_model_support():
     document = _document(equipment_model="CompactLogix 5380", content="Duplicate IP recovery guidance.")
     evidence = analyze_retrieval_evidence(
         "两台 5380 地址冲突后怎样恢复？",
@@ -206,9 +206,22 @@ def test_lexical_only_evidence_without_product_identity_does_not_claim_family_su
         [document],
         "hybrid",
     )
-    assert evidence.identity_relation == IdentityRelation.UNKNOWN.value
-    assert evidence.decision == "ABSTAIN"
-    assert evidence.reason == DecisionReason.INSUFFICIENT_EVIDENCE.value
+    assert evidence.identity_relation == IdentityRelation.EXACT_MODEL.value
+    assert evidence.decision == "ANSWER"
+    assert evidence.reason == DecisionReason.EXACT_MODEL_EVIDENCE.value
+
+
+def test_multi_identity_query_accepts_evidence_from_either_requested_model():
+    first = _document(equipment_model="Drive 100", content="Drive 100 shutdown requirement.")
+    second = _document(equipment_model="Drive 200", content="Drive 200 shutdown requirement.")
+    evidence = analyze_retrieval_evidence(
+        "Drive 100 vs Drive 200 shutdown requirements",
+        _result(second),
+        [first, second],
+        "vector",
+    )
+    assert evidence.identity_relation == IdentityRelation.EXACT_MODEL.value
+    assert evidence.decision == "ANSWER"
 
 
 def test_ordinary_versions_are_not_industrial_identifiers():

@@ -15,14 +15,14 @@ if __package__:
     from .ingestion import PageText, ingest_pages
     from .learning_content import generate_hierarchical_learning_content
     from .llm_client import generate_llm_answer
-    from .retrieval import RetrievalCandidate, RetrievalResult, analyze_query, analyze_retrieval_evidence, filter_documents, rrf_fuse
+    from .retrieval import RetrievalCandidate, RetrievalResult, analyze_query, analyze_retrieval_evidence, build_retrieval_scope, collect_scoped_candidates, rrf_fuse
     from .retrieval.bm25 import BM25Index
     from .retrieval.filters import has_exact_metadata_match
 else:
     from ingestion import PageText, ingest_pages
     from learning_content import generate_hierarchical_learning_content
     from llm_client import generate_llm_answer
-    from retrieval import RetrievalCandidate, RetrievalResult, analyze_query, analyze_retrieval_evidence, filter_documents, rrf_fuse
+    from retrieval import RetrievalCandidate, RetrievalResult, analyze_query, analyze_retrieval_evidence, build_retrieval_scope, collect_scoped_candidates, rrf_fuse
     from retrieval.bm25 import BM25Index
     from retrieval.filters import has_exact_metadata_match
 
@@ -462,19 +462,43 @@ def _vector_candidates(
     knowledge_base_id: str,
     analysis,
     top_k: int,
-    allowed_chunk_ids: set[str] | None = None,
+    allowed_documents: list | None = None,
 ):
-    results = load_vector_db(knowledge_base_id).similarity_search_with_score(
-        question,
-        k=max(top_k, len(allowed_chunk_ids or ())),
-    )
-    if allowed_chunk_ids:
-        results = [
-            (document, score)
-            for document, score in results
-            if str((getattr(document, "metadata", {}) or {}).get("chunk_id", ""))
-            in allowed_chunk_ids
-        ]
+    vector_db = load_vector_db(knowledge_base_id)
+    allowed_chunk_ids = {
+        str((getattr(document, "metadata", {}) or {}).get("chunk_id", ""))
+        for document in (allowed_documents or [])
+    }
+    metadata_filter = None
+    if allowed_documents:
+        models = {
+            str((getattr(document, "metadata", {}) or {}).get("equipment_model", ""))
+            for document in allowed_documents
+            if str((getattr(document, "metadata", {}) or {}).get("equipment_model", ""))
+        }
+        if len(allowed_documents) <= 100 and allowed_chunk_ids:
+            values = sorted(allowed_chunk_ids)
+            metadata_filter = {"chunk_id": values[0]} if len(values) == 1 else {"chunk_id": {"$in": values}}
+        elif models:
+            values = sorted(models)
+            metadata_filter = {"equipment_model": values[0]} if len(values) == 1 else {"equipment_model": {"$in": values}}
+    try:
+        results = vector_db.similarity_search_with_score(
+            question,
+            k=top_k,
+            **({"filter": metadata_filter} if metadata_filter else {}),
+        )
+    except Exception:
+        results = vector_db.similarity_search_with_score(
+            question,
+            k=max(top_k, len(allowed_chunk_ids)),
+        )
+        if allowed_chunk_ids:
+            results = [
+                (document, score)
+                for document, score in results
+                if str((getattr(document, "metadata", {}) or {}).get("chunk_id", "")) in allowed_chunk_ids
+            ]
     return [
         RetrievalCandidate(
             document=document, retrieval_source="vector", vector_rank=rank,
@@ -497,27 +521,38 @@ def retrieve_docs(
     all_documents = documents
     analysis = analyze_query(question, documents)
     mode = get_retrieval_mode(retrieval_mode)
-    documents, filter_applied = filter_documents(documents, analysis)
-    if analysis.error_code and not filter_applied:
+    scope = build_retrieval_scope(question, documents, analysis)
+    if analysis.identifiers and not scope.identifier_found:
         return RetrievalResult(
             [], query_analysis=analysis, corpus_documents=all_documents,
-            retrieval_mode=mode,
+            retrieval_mode=mode, scope_decision=scope,
         )
-    lexical = _lexical_candidates(
-        question, documents, analysis, _positive_int("LEXICAL_TOP_K", DEFAULT_LEXICAL_TOP_K)
+    lexical_k = _positive_int("LEXICAL_TOP_K", DEFAULT_LEXICAL_TOP_K)
+    vector_k = _positive_int("VECTOR_TOP_K", DEFAULT_VECTOR_TOP_K)
+    lexical = collect_scoped_candidates(
+        scope,
+        lexical_k,
+        lambda scoped, limit: _lexical_candidates(question, scoped, analysis, limit),
     )
+    for rank, candidate in enumerate(lexical, start=1):
+        candidate.lexical_rank = rank
     if mode == "lexical":
         candidates = lexical[:k]
     else:
         try:
-            vector = _vector_candidates(
-                question, knowledge_base_id, analysis,
-                _positive_int("VECTOR_TOP_K", DEFAULT_VECTOR_TOP_K),
-                {
-                    str((getattr(document, "metadata", {}) or {}).get("chunk_id", ""))
-                    for document in documents
-                },
+            vector = collect_scoped_candidates(
+                scope,
+                vector_k,
+                lambda scoped, limit: _vector_candidates(
+                    question,
+                    knowledge_base_id,
+                    analysis,
+                    limit,
+                    None if len(scoped) == len(all_documents) else scoped,
+                ),
             )
+            for rank, candidate in enumerate(vector, start=1):
+                candidate.vector_rank = rank
         except Exception:
             if mode == "vector":
                 raise
@@ -535,7 +570,7 @@ def retrieve_docs(
         candidate.final_rank = rank
     return RetrievalResult(
         candidates, query_analysis=analysis,
-        corpus_documents=all_documents, retrieval_mode=mode,
+        corpus_documents=all_documents, retrieval_mode=mode, scope_decision=scope,
     )
 
 
@@ -582,7 +617,10 @@ def filter_relevant_docs(scored_docs):
                 candidate.vector_score is not None
                 and candidate.evidence_score <= get_relevance_threshold()
             )
-        ])
+        ], query_analysis=getattr(scored_docs, "query_analysis", None),
+            corpus_documents=getattr(scored_docs, "corpus_documents", []),
+            retrieval_mode=getattr(scored_docs, "retrieval_mode", ""),
+            scope_decision=getattr(scored_docs, "scope_decision", None))
     threshold = get_relevance_threshold()
     return [
         (document, score)

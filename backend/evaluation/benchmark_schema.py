@@ -14,7 +14,8 @@ QUERY_TYPES = {
 FAILURE_TYPES = (
     "RECALL_FAILURE", "RANKING_FAILURE", "IDENTIFIER_CONFUSION",
     "MODEL_CONFUSION", "SECTION_CONFUSION", "SEMANTIC_CONFUSION",
-    "OOD_FALSE_POSITIVE", "METADATA_FAILURE",
+    "OOD_FALSE_POSITIVE", "METADATA_FAILURE", "OVER_FILTER_FAILURE",
+    "AMBIGUOUS_MODEL", "SCOPE_FALLBACK",
 )
 
 
@@ -78,9 +79,16 @@ def classify_failure(query: dict, row: dict) -> str | None:
         return "RANKING_FAILURE"
     if rank:
         return None
+    scope = row.get("retrieval_scope", {})
+    if scope.get("requested_scope") == "UNKNOWN_SCOPE":
+        return "AMBIGUOUS_MODEL"
     if query["expected_error_code"] and top.get("error_code"):
         return "IDENTIFIER_CONFUSION"
-    if query["expected_equipment_model"] and top.get("equipment_model"):
+    if (
+        query["expected_equipment_model"]
+        and top.get("equipment_model")
+        and top.get("equipment_model") != query["expected_equipment_model"]
+    ):
         return "MODEL_CONFUSION"
     if query["expected_section"] and top.get("section"):
         return "SECTION_CONFUSION"
@@ -100,6 +108,8 @@ def evaluate_rows(queries: list[dict], rows: list[dict]) -> dict:
         row["failure_type"] = failure
         if failure:
             failures[failure] += 1
+        if row.get("retrieval_scope", {}).get("fallback_used"):
+            failures["SCOPE_FALLBACK"] += 1
         if query["answerable"]:
             category[query["category"]].append(row)
 

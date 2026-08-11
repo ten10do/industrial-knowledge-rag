@@ -22,6 +22,7 @@ from backend.evaluation.full_vector_benchmark import (
 from backend.evaluation.retrieval_benchmark import benchmark_knowledge_base
 from backend.retrieval.reranker import CrossEncoderReranker, RerankerConfig
 from backend.retrieval.evidence import analyze_retrieval_evidence
+from backend.retrieval.product_identity import identity_from_metadata
 
 
 PRIVATE_REQUIRED_DOCUMENT_FIELDS = {
@@ -57,6 +58,11 @@ def annotation_hash(manifest: dict) -> str:
 
 def calibration_hash(calibration: dict) -> str:
     payload = json.dumps(calibration["queries"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def development_hash(development: dict) -> str:
+    payload = json.dumps(development["queries"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -125,6 +131,35 @@ def load_private_calibration(path: Path, manifest: dict, chunk_ids: set[str]) ->
     if frozen_hash and frozen_hash != calibration_hash(calibration):
         raise ValueError("Calibration hash does not match the frozen query set.")
     return calibration
+
+
+def load_private_development(path: Path, manifest: dict, chunk_ids: set[str]) -> dict:
+    development = json.loads(path.read_text(encoding="utf-8"))
+    queries = development.get("queries", [])
+    if not 15 <= len(queries) <= 25:
+        raise ValueError("V3.3 development set requires 15 to 25 independent queries.")
+    required = {
+        "query_id", "query", "category", "answerable", "relevant_chunk_ids",
+        "expected_model", "expected_error_code", "expected_scope",
+    }
+    frozen_queries = {item["query"].strip().casefold() for item in manifest["queries"]}
+    query_ids = set()
+    for item in queries:
+        if not required.issubset(item) or item["query_id"] in query_ids:
+            raise ValueError("V3.3 development query schema or ID is invalid.")
+        if item["query"].strip().casefold() in frozen_queries:
+            raise ValueError("V3.3 development queries must differ from V3.1 frozen queries.")
+        if item["answerable"] != bool(item["relevant_chunk_ids"]):
+            raise ValueError("V3.3 development answerable flag must match relevant chunks.")
+        if not set(item["relevant_chunk_ids"]).issubset(chunk_ids):
+            raise ValueError("V3.3 development query references an unknown chunk.")
+        query_ids.add(item["query_id"])
+    if development.get("corpus_annotation_sha256") != annotation_hash(manifest):
+        raise ValueError("V3.3 development corpus hash does not match V3.1.")
+    frozen_hash = development.get("freeze", {}).get("development_sha256")
+    if frozen_hash and frozen_hash != development_hash(development):
+        raise ValueError("V3.3 development hash does not match its query set.")
+    return development
 
 
 def _resolve_local_file(manifest_path: Path, value: str) -> Path:
@@ -202,10 +237,16 @@ def _candidate_rows(candidates: list) -> list[dict]:
         "section": candidate.metadata.get("section", ""),
         "equipment_model": candidate.metadata.get("equipment_model", ""),
         "error_code": candidate.metadata.get("error_code", ""),
+        "lexical_rank": getattr(candidate, "lexical_rank", None),
+        "vector_rank": getattr(candidate, "vector_rank", None),
+        "fusion_rank": getattr(candidate, "pre_rerank_rank", None) or getattr(candidate, "final_rank", None),
         "vector_distance": candidate.vector_score,
         "lexical_score": candidate.lexical_score,
         "pre_rerank_rank": candidate.pre_rerank_rank,
         "rerank_rank": candidate.rerank_rank,
+        "identity_relation": getattr(candidate, "identity_relation", "UNKNOWN"),
+        "scope_match": getattr(candidate, "scope_match", "none"),
+        "scope_level": getattr(candidate, "scope_level", "GLOBAL_SCOPE"),
     } for rank, candidate in enumerate(candidates, start=1)]
 
 
@@ -235,6 +276,29 @@ def _summary_metrics(queries: list[dict], rows: list[dict]) -> dict:
     def top1_rate(items: list[dict]) -> float | None:
         return (sum(by_id[item["query_id"]]["rank"] == 1 for item in items) / len(items)) if items else None
 
+    exact_model_queries = [
+        item for item in queries
+        if item["answerable"]
+        and by_id[item["query_id"]].get("retrieval_scope", {}).get("requested_scope") == "EXACT_MODEL_SCOPE"
+    ]
+    identifier_queries = [item for item in queries if item["answerable"] and item["expected_error_code"]]
+    scoped_rows = [
+        by_id[item["query_id"]] for item in queries
+        if by_id[item["query_id"]].get("retrieval_scope", {}).get("requested_scope")
+        in {"EXACT_MODEL_SCOPE", "SERIES_SCOPE", "FAMILY_SCOPE", "MULTI_IDENTITY_SCOPE"}
+    ]
+    scoped_candidates = [candidate for row in scoped_rows for candidate in row["candidates"][:5]]
+    exact_model_confusions = [
+        item for item in exact_model_queries
+        if (top := (by_id[item["query_id"]]["candidates"] or [{}])[0]).get("equipment_model")
+        and item.get("expected_model")
+        and top.get("equipment_model") != item["expected_model"]
+    ]
+    scope_labeled = [item for item in queries if item.get("expected_scope")]
+
+    def recall_at_5(items: list[dict]) -> float | None:
+        return (sum((by_id[item["query_id"]]["rank"] or 99) <= 5 for item in items) / len(items)) if items else None
+
     return {
         **report,
         "comparison_coverage_at_5": (
@@ -250,6 +314,33 @@ def _summary_metrics(queries: list[dict], rows: list[dict]) -> dict:
             "count": len(model_confusion),
             "rate": len(model_confusion) / len(model_queries) if model_queries else None,
             "query_ids": [item["query_id"] for item in model_confusion],
+        },
+        "model_aware_metrics": {
+            "exact_model_query_count": len(exact_model_queries),
+            "exact_model_hit_at_1": top1_rate(exact_model_queries),
+            "exact_model_recall_at_5": recall_at_5(exact_model_queries),
+            "identifier_query_count": len(identifier_queries),
+            "identifier_hit_at_1": top1_rate(identifier_queries),
+            "identifier_recall_at_5": recall_at_5(identifier_queries),
+            "equipment_model_confusion_rate": (
+                len(exact_model_confusions) / len(exact_model_queries) if exact_model_queries else None
+            ),
+            "scope_precision": (
+                sum(candidate.get("scope_match") == "primary" for candidate in scoped_candidates) / len(scoped_candidates)
+                if scoped_candidates else None
+            ),
+            "scope_fallback_rate": (
+                sum(row.get("retrieval_scope", {}).get("fallback_used", False) for row in rows) / len(rows)
+                if rows else None
+            ),
+            "scope_decision_accuracy": (
+                sum(
+                    by_id[item["query_id"]].get("retrieval_scope", {}).get("requested_scope")
+                    == item["expected_scope"]
+                    for item in scope_labeled
+                ) / len(scope_labeled)
+                if scope_labeled else None
+            ),
         },
     }
 
@@ -285,6 +376,10 @@ def _run_mode(mode: str, queries: list[dict], light_rag, light_id, reranker) -> 
             "query_id": query["query_id"], "query": query["query"],
             "rank": rank, "refused": not candidate_rows, "candidates": candidate_rows,
             "candidate_ids": [item["chunk_id"] for item in candidate_rows],
+            "retrieval_scope": (
+                candidates.scope_decision.as_dict()
+                if getattr(candidates, "scope_decision", None) else {}
+            ),
         })
     report = _summary_metrics(queries, rows)
     report["latency_ms_median"] = statistics.median(latencies)
@@ -312,6 +407,79 @@ def _rerank_analysis(rows: list[dict]) -> dict:
     }
 
 
+def _over_filter_report(before: dict, after: dict) -> dict:
+    before_rows = {item["query_id"]: item for item in before.get("rows", [])}
+    examples = []
+    for row in after.get("rows", []):
+        baseline = before_rows.get(row["query_id"], {})
+        if baseline.get("rank") is not None and row.get("rank") is None:
+            row["failure_type"] = "OVER_FILTER_FAILURE"
+            examples.append(row["query_id"])
+    after["failure_summary"]["OVER_FILTER_FAILURE"] = len(examples)
+    return {"count": len(examples), "examples": examples}
+
+
+def _model_confusion_audit(manifest: dict, baseline: dict, documents: list[Document]) -> list[dict]:
+    queries = {item["query_id"]: item for item in manifest["queries"]}
+    reports = baseline["reports"]
+    mode_rows = {
+        mode: {item["query_id"]: item for item in report["rows"]}
+        for mode, report in reports.items()
+    }
+    evidence_rows = {item["query_id"]: item for item in baseline["evidence"]["rows"]}
+    documents_by_chunk = {str(item.metadata.get("chunk_id", "")): item for item in documents}
+    audit = []
+    for rerank_row in reports["hybrid_rerank"]["rows"]:
+        if rerank_row.get("failure_type") != "MODEL_CONFUSION":
+            continue
+        query_id = rerank_row["query_id"]
+        query = queries[query_id]
+        hybrid = mode_rows["hybrid"][query_id]
+        lexical = mode_rows["bm25"][query_id]
+        vector = mode_rows["vector"][query_id]
+        rerank_by_chunk = {item["chunk_id"]: item["rank"] for item in rerank_row["candidates"]}
+        lexical_by_chunk = {item["chunk_id"]: item["rank"] for item in lexical["candidates"]}
+        vector_by_chunk = {item["chunk_id"]: item["rank"] for item in vector["candidates"]}
+        candidates = []
+        for candidate in hybrid["candidates"][:5]:
+            identity = identity_from_metadata({"equipment_model": candidate.get("equipment_model", "")})
+            candidates.append({
+                "chunk_id": candidate["chunk_id"],
+                "candidate_identity": identity.as_dict(),
+                "lexical_rank": lexical_by_chunk.get(candidate["chunk_id"]),
+                "vector_rank": vector_by_chunk.get(candidate["chunk_id"]),
+                "fusion_rank": candidate["rank"],
+                "rerank_rank": rerank_by_chunk.get(candidate["chunk_id"]),
+            })
+        relevant_documents = [
+            documents_by_chunk[chunk_id]
+            for chunk_id in query["relevant_chunk_ids"]
+            if chunk_id in documents_by_chunk
+        ]
+        parsed = evidence_rows[query_id].get("parsed_query_metadata", {})
+        relevant_in_hybrid = hybrid.get("rank") is not None
+        if not parsed.get("equipment_model") and any(char.isdigit() for char in query["query"]):
+            category = "C_MODEL_MISSING_FROM_QUERY_PARSER"
+        elif not parsed.get("equipment_model") and not parsed.get("product_series") and not parsed.get("product_family"):
+            category = "F_AMBIGUOUS_PRODUCT_IDENTITY"
+        elif not relevant_in_hybrid:
+            category = "D_RELEVANT_MODEL_CANDIDATE_NEVER_RETRIEVED"
+        else:
+            category = "A_EXACT_MODEL_QUERY_WRONG_MODEL"
+        audit.append({
+            "query_id": query_id,
+            "query": query["query"],
+            "target_identity": (
+                identity_from_metadata(relevant_documents[0].metadata).as_dict()
+                if relevant_documents else {"equipment_model": query["expected_model"]}
+            ),
+            "parsed_query_identity": parsed,
+            "classification": category,
+            "top_5_candidates": candidates,
+        })
+    return audit
+
+
 def _evidence_row(query: dict, result, evidence, documents_by_chunk: dict[str, Document]) -> dict:
     analysis = getattr(result, "query_analysis", None)
     row = {
@@ -321,6 +489,10 @@ def _evidence_row(query: dict, result, evidence, documents_by_chunk: dict[str, D
         "ood_type": query.get("ood_type", ""),
         "answerable": query["answerable"],
         "parsed_query_metadata": asdict(analysis) if analysis else {},
+        "retrieval_scope": (
+            result.scope_decision.as_dict()
+            if getattr(result, "scope_decision", None) else {}
+        ),
         "relevant_chunk_metadata": [
             {
                 "chunk_id": chunk_id,
@@ -446,6 +618,12 @@ def run_private_benchmark(manifest_path: Path) -> dict:
         if calibration_path.exists()
         else None
     )
+    development_path = manifest_path.parent / "annotations" / "v33_development.json"
+    development = (
+        load_private_development(development_path, manifest, ingested_chunk_ids)
+        if development_path.exists()
+        else None
+    )
     benchmark = {"documents": [{"content": item.page_content, "metadata": dict(item.metadata)} for item in ingested]}
     reranker = CrossEncoderReranker(RerankerConfig(enabled=True, candidate_k=5, top_k=3, device="cpu"))
     with ExitStack() as stack:
@@ -454,6 +632,23 @@ def run_private_benchmark(manifest_path: Path) -> dict:
         reports = {mode: _run_mode(mode, manifest["queries"], light_rag, light_id, reranker) for mode in PRIVATE_MODES}
         evidence = _evidence_report(manifest["queries"], ingested)
         calibration_report = _calibration_report(calibration["queries"], ingested) if calibration else None
+        development_reports = (
+            {
+                mode: _run_mode(mode, development["queries"], light_rag, light_id, reranker)
+                for mode in ("hybrid", "hybrid_rerank")
+            }
+            if development else None
+        )
+    baseline_path = manifest_path.parent / "annotations" / "v32_final.json"
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else None
+    over_filter = (
+        {
+            mode: _over_filter_report(baseline["reports"][mode], reports[mode])
+            for mode in PRIVATE_MODES
+        }
+        if baseline else {"status": "NOT_RUN"}
+    )
+    confusion_audit = _model_confusion_audit(manifest, baseline, ingested) if baseline else []
     counts = Counter(item["document_type"] for item in manifest["documents"])
     return {
         "dataset": manifest.get("name", "private-real-corpus"),
@@ -470,6 +665,27 @@ def run_private_benchmark(manifest_path: Path) -> dict:
         "parser_audit": audit,
         "query_distribution": dict(Counter(item["category"] for item in manifest["queries"])),
         "reports": reports,
+        "over_filter": over_filter,
+        "model_confusion_audit": confusion_audit,
+        "baseline": ({
+            "source": baseline_path.name,
+            "reports": {
+                mode: {
+                    "overall": baseline["reports"][mode]["overall"],
+                    "failure_summary": baseline["reports"][mode]["failure_summary"],
+                    "latency_ms_median": baseline["reports"][mode]["latency_ms_median"],
+                    "comparison_coverage_at_5": baseline["reports"][mode].get("comparison_coverage_at_5"),
+                }
+                for mode in PRIVATE_MODES
+            },
+            "evidence": {
+                key: baseline["evidence"][key]
+                for key in (
+                    "decision_accuracy", "ood_recall", "answerable_recall",
+                    "false_answer_rate", "false_refusal_rate",
+                )
+            },
+        } if baseline else {"status": "NOT_RUN"}),
         "evidence": evidence,
         "calibration": ({
             "name": calibration.get("name", "v3.2-private-calibration"),
@@ -480,4 +696,11 @@ def run_private_benchmark(manifest_path: Path) -> dict:
             "hash": calibration_hash(calibration),
             **calibration_report,
         } if calibration else {"status": "NOT_RUN"}),
+        "development": ({
+            "name": development.get("name", "v3.3-private-development"),
+            "count": len(development["queries"]),
+            "categories": dict(Counter(item["category"] for item in development["queries"])),
+            "hash": development_hash(development),
+            "reports": development_reports,
+        } if development else {"status": "NOT_RUN"}),
     }

@@ -4,6 +4,7 @@ from .filters import analyze_query, filter_documents
 from .fusion import rrf_fuse
 from .evidence import Decision, DecisionReason, EvidencePolicy, RetrievalEvidence, analyze_retrieval_evidence
 from .reranker import CrossEncoderReranker, RerankerConfig, RerankOutcome, get_reranker
+from .scope import RetrievalScope, RetrievalScopeDecision, build_retrieval_scope, collect_scoped_candidates
 
 __all__ = [
     "BM25Index",
@@ -21,4 +22,8 @@ __all__ = [
     "RerankerConfig",
     "RerankOutcome",
     "get_reranker",
+    "RetrievalScope",
+    "RetrievalScopeDecision",
+    "build_retrieval_scope",
+    "collect_scoped_candidates",
 ]

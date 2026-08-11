@@ -14,7 +14,9 @@ from backend.evaluation.private_benchmark import (
     _rerank_analysis,
     annotation_hash,
     calibration_hash,
+    development_hash,
     load_private_calibration,
+    load_private_development,
     load_private_manifest,
 )
 
@@ -160,6 +162,8 @@ def test_private_candidate_rows_include_citation_metadata():
         "rank": 1, "chunk_id": "chunk-a", "document_id": "doc-a", "source": "Vendor Manual",
         "page": 12, "section": "Setup", "equipment_model": "", "error_code": "",
         "vector_distance": 0.1, "lexical_score": 0.2, "pre_rerank_rank": 1, "rerank_rank": 1,
+        "lexical_rank": None, "vector_rank": None, "fusion_rank": 1,
+        "identity_relation": "UNKNOWN", "scope_match": "none", "scope_level": "GLOBAL_SCOPE",
     }
 
 
@@ -190,6 +194,35 @@ def test_private_calibration_is_independent_sized_and_frozen(tmp_path):
     loaded = load_private_calibration(path, manifest, {"chunk-a"})
     assert len(loaded["queries"]) == 20
     assert calibration_hash(loaded) == calibration["freeze"]["calibration_sha256"]
+
+
+def test_private_v33_development_set_is_independent_sized_and_frozen(tmp_path):
+    manifest = _private_manifest()
+    manifest["freeze"] = {"annotation_sha256": annotation_hash(manifest)}
+    development = {
+        "name": "v3.3-test",
+        "corpus_annotation_sha256": annotation_hash(manifest),
+        "freeze": {},
+        "queries": [
+            {
+                "query_id": f"d{index:02d}",
+                "query": f"Independent model-aware development question {index}",
+                "category": "exact_model",
+                "answerable": True,
+                "relevant_chunk_ids": ["chunk-a"],
+                "expected_model": "Drive-A",
+                "expected_error_code": "",
+                "expected_scope": "EXACT_MODEL_SCOPE",
+            }
+            for index in range(15)
+        ],
+    }
+    development["freeze"]["development_sha256"] = development_hash(development)
+    path = tmp_path / "development.json"
+    path.write_text(__import__("json").dumps(development), encoding="utf-8")
+    loaded = load_private_development(path, manifest, {"chunk-a"})
+    assert len(loaded["queries"]) == 15
+    assert development_hash(loaded) == development["freeze"]["development_sha256"]
 
 
 def test_synthetic_runner_is_deterministic():
