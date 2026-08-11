@@ -12,12 +12,15 @@ from backend.evaluation.private_benchmark import (
     _candidate_rows,
     _resolve_local_file,
     _rerank_analysis,
+    _support_gate_evidence_summary,
     annotation_hash,
     calibration_hash,
     development_hash,
+    load_support_calibration,
     load_private_calibration,
     load_private_development,
     load_private_manifest,
+    support_calibration_hash,
 )
 
 
@@ -223,6 +226,46 @@ def test_private_v33_development_set_is_independent_sized_and_frozen(tmp_path):
     loaded = load_private_development(path, manifest, {"chunk-a"})
     assert len(loaded["queries"]) == 15
     assert development_hash(loaded) == development["freeze"]["development_sha256"]
+
+
+def test_private_v34_support_calibration_is_independent_sized_and_frozen(tmp_path):
+    manifest = _private_manifest()
+    manifest["freeze"] = {"annotation_sha256": annotation_hash(manifest)}
+    calibration = {
+        "name": "v3.4-test",
+        "corpus_annotation_sha256": annotation_hash(manifest),
+        "freeze": {},
+        "queries": [
+            {
+                "query_id": f"s{index:02d}",
+                "query": f"Independent evidence support question {index}",
+                "category": "supported_parameter" if index < 12 else "hard_negative",
+                "supported": index < 12,
+                "relevant_chunk_ids": ["chunk-a"] if index < 12 else [],
+                "expected_base_decision": "ANSWER",
+            }
+            for index in range(20)
+        ],
+    }
+    calibration["freeze"]["support_calibration_sha256"] = support_calibration_hash(calibration)
+    path = tmp_path / "support-calibration.json"
+    path.write_text(__import__("json").dumps(calibration), encoding="utf-8")
+    loaded = load_support_calibration(path, manifest, {"chunk-a"})
+    assert len(loaded["queries"]) == 20
+    assert support_calibration_hash(loaded) == calibration["freeze"]["support_calibration_sha256"]
+
+
+def test_v34_support_summary_classifies_new_false_refusals():
+    base = {"rows": [{
+        "query_id": "q1", "answerable": True, "decision": "ANSWER",
+        "category": "procedure", "ood_type": "",
+    }]}
+    support = {"rows": [{
+        "query_id": "q1", "final_decision": "ABSTAIN",
+        "support": {"status": "INSUFFICIENT"},
+    }]}
+    report = _support_gate_evidence_summary(base, support)
+    assert report["false_refusal_taxonomy"] == {"SUPPORT_INSUFFICIENT": 1}
 
 
 def test_synthetic_runner_is_deterministic():

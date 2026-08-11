@@ -20,6 +20,8 @@ from backend.evaluation.full_vector_benchmark import (
     full_vector_knowledge_base,
 )
 from backend.evaluation.retrieval_benchmark import benchmark_knowledge_base
+from backend.retrieval import RetrievalCandidate, RetrievalResult, analyze_query
+from backend.retrieval.evidence_support import skipped_support, validate_evidence_support
 from backend.retrieval.reranker import CrossEncoderReranker, RerankerConfig
 from backend.retrieval.evidence import analyze_retrieval_evidence
 from backend.retrieval.product_identity import identity_from_metadata
@@ -63,6 +65,11 @@ def calibration_hash(calibration: dict) -> str:
 
 def development_hash(development: dict) -> str:
     payload = json.dumps(development["queries"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def support_calibration_hash(calibration: dict) -> str:
+    payload = json.dumps(calibration["queries"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -160,6 +167,41 @@ def load_private_development(path: Path, manifest: dict, chunk_ids: set[str]) ->
     if frozen_hash and frozen_hash != development_hash(development):
         raise ValueError("V3.3 development hash does not match its query set.")
     return development
+
+
+def load_support_calibration(path: Path, manifest: dict, chunk_ids: set[str]) -> dict:
+    calibration = json.loads(path.read_text(encoding="utf-8"))
+    queries = calibration.get("queries", [])
+    if not 20 <= len(queries) <= 30:
+        raise ValueError("V3.4 support calibration requires 20 to 30 independent queries.")
+    if sum(bool(item.get("supported")) for item in queries) < 12:
+        raise ValueError("V3.4 support calibration requires at least 12 supported queries.")
+    if sum(not bool(item.get("supported")) for item in queries) < 8:
+        raise ValueError("V3.4 support calibration requires at least 8 unsupported queries.")
+    required = {
+        "query_id", "query", "category", "supported", "relevant_chunk_ids",
+        "expected_base_decision",
+    }
+    frozen_queries = {item["query"].strip().casefold() for item in manifest["queries"]}
+    query_ids = set()
+    for item in queries:
+        if not required.issubset(item) or item["query_id"] in query_ids:
+            raise ValueError("V3.4 support calibration query schema or ID is invalid.")
+        if item["query"].strip().casefold() in frozen_queries:
+            raise ValueError("V3.4 support calibration must differ from V3.1 frozen queries.")
+        if item["expected_base_decision"] not in {"ANSWER", "ABSTAIN"}:
+            raise ValueError("V3.4 expected base decision is invalid.")
+        if not set(item["relevant_chunk_ids"]).issubset(chunk_ids):
+            raise ValueError("V3.4 support calibration references an unknown chunk.")
+        if not item["supported"] and item["relevant_chunk_ids"]:
+            raise ValueError("Unsupported V3.4 queries must not claim supporting chunks.")
+        query_ids.add(item["query_id"])
+    if calibration.get("corpus_annotation_sha256") != annotation_hash(manifest):
+        raise ValueError("V3.4 support calibration corpus hash does not match V3.1.")
+    frozen_hash = calibration.get("freeze", {}).get("support_calibration_sha256")
+    if frozen_hash and frozen_hash != support_calibration_hash(calibration):
+        raise ValueError("V3.4 support calibration hash does not match its query set.")
+    return calibration
 
 
 def _resolve_local_file(manifest_path: Path, value: str) -> Path:
@@ -559,6 +601,159 @@ def _evidence_report(queries: list[dict], documents: list[Document]) -> dict:
     return _summarize_evidence(rows)
 
 
+def _support_candidate_rows(queries: list[dict], documents: list[Document], reranker) -> tuple[list[dict], dict[str, dict]]:
+    rows, base_rows = [], {}
+    documents_by_chunk = {str(item.metadata.get("chunk_id", "")): item for item in documents}
+    for query in queries:
+        raw = rag_core.retrieve_docs(
+            query["query"], k=5,
+            knowledge_base_id=FULL_BENCHMARK_KNOWLEDGE_BASE_ID,
+            retrieval_mode="hybrid",
+        )
+        base = rag_core.analyze_evidence(query["query"], raw, "hybrid")
+        base_rows[query["query_id"]] = {"decision": base.decision, "reason": base.reason}
+        candidates = rag_core.filter_relevant_docs(raw)
+        if base.decision == "ANSWER":
+            candidates = reranker.rerank(query["query"], candidates, top_k=3).result
+        else:
+            candidates = RetrievalResult(
+                [], query_analysis=getattr(raw, "query_analysis", None),
+                corpus_documents=documents, retrieval_mode="hybrid",
+                scope_decision=getattr(raw, "scope_decision", None),
+            )
+        rows.append({
+            "query_id": query["query_id"],
+            "candidates": _candidate_rows(candidates.candidates),
+        })
+    return rows, base_rows
+
+
+def _support_report(
+    queries: list[dict],
+    candidate_rows: list[dict],
+    base_rows: dict[str, dict],
+    documents: list[Document],
+) -> dict:
+    documents_by_chunk = {str(item.metadata.get("chunk_id", "")): item for item in documents}
+    candidates_by_id = {item["query_id"]: item["candidates"] for item in candidate_rows}
+    rows, latencies = [], []
+    for query in queries:
+        base = base_rows[query["query_id"]]
+        candidate_data = candidates_by_id.get(query["query_id"], [])
+        candidates = [
+            RetrievalCandidate(
+                document=documents_by_chunk[item["chunk_id"]],
+                retrieval_source="hybrid",
+                final_rank=rank,
+                pre_rerank_rank=item.get("pre_rerank_rank"),
+                rerank_rank=item.get("rerank_rank"),
+                identity_relation=item.get("identity_relation", "UNKNOWN"),
+                scope_match=item.get("scope_match", "none"),
+                scope_level=item.get("scope_level", "GLOBAL_SCOPE"),
+            )
+            for rank, item in enumerate(candidate_data, start=1)
+            if item["chunk_id"] in documents_by_chunk
+        ]
+        result = RetrievalResult(
+            candidates,
+            query_analysis=analyze_query(query["query"], documents),
+            corpus_documents=documents,
+            retrieval_mode="hybrid",
+        )
+        started = time.perf_counter()
+        support = (
+            validate_evidence_support(query["query"], result, documents)
+            if base["decision"] == "ANSWER"
+            else skipped_support()
+        )
+        latencies.append((time.perf_counter() - started) * 1000)
+        expected = bool(query.get("supported", query.get("answerable", False)))
+        gate_refused = base["decision"] == "ABSTAIN" or support.status == "INSUFFICIENT"
+        predicted_supported = not gate_refused
+        if base["decision"] == "ABSTAIN":
+            audit_status = "UNSUPPORTED" if not expected else "AMBIGUOUS"
+        elif support.status == "SUPPORTED":
+            audit_status = "SUPPORTED"
+        elif support.status == "INSUFFICIENT":
+            audit_status = "PARTIALLY_SUPPORTED" if expected else "UNSUPPORTED"
+        else:
+            audit_status = "AMBIGUOUS"
+        rows.append({
+            "query_id": query["query_id"],
+            "query": query["query"],
+            "expected_supported": expected,
+            "base_decision": base["decision"],
+            "base_reason": base["reason"],
+            "support": support.as_dict(),
+            "final_decision": "ABSTAIN" if gate_refused else "ANSWER",
+            "predicted_supported": predicted_supported,
+            "audit_status": audit_status,
+            "top_candidates": [{
+                **item,
+                "candidate_evidence": " ".join(
+                    documents_by_chunk[item["chunk_id"]].page_content.split()
+                )[:500] if item["chunk_id"] in documents_by_chunk else "",
+            } for item in candidate_data],
+        })
+    supported = [item for item in rows if item["expected_supported"]]
+    unsupported = [item for item in rows if not item["expected_supported"]]
+    correct = sum(item["predicted_supported"] == item["expected_supported"] for item in rows)
+    false_support = sum(item["predicted_supported"] for item in unsupported)
+    false_insufficient = sum(not item["predicted_supported"] for item in supported)
+    return {
+        "support_accuracy": correct / len(rows) if rows else None,
+        "unsupported_recall": (
+            sum(not item["predicted_supported"] for item in unsupported) / len(unsupported)
+            if unsupported else None
+        ),
+        "supported_recall": (
+            sum(item["predicted_supported"] for item in supported) / len(supported)
+            if supported else None
+        ),
+        "false_support_rate": false_support / len(unsupported) if unsupported else None,
+        "false_insufficient_rate": false_insufficient / len(supported) if supported else None,
+        "rule_latency_ms_median": statistics.median(latencies) if latencies else None,
+        "status_distribution": dict(Counter(item["support"]["status"] for item in rows)),
+        "rows": rows,
+    }
+
+
+def _frozen_support_report(
+    queries: list[dict],
+    retrieval_report: dict,
+    evidence_report: dict,
+    documents: list[Document],
+) -> dict:
+    base_rows = {
+        item["query_id"]: {"decision": item["decision"], "reason": item["reason"]}
+        for item in evidence_report["rows"]
+    }
+    return _support_report(queries, retrieval_report["rows"], base_rows, documents)
+
+
+def _support_gate_evidence_summary(base: dict, support: dict) -> dict:
+    rows_by_id = {item["query_id"]: item for item in support["rows"]}
+    rows = []
+    for item in base["rows"]:
+        support_row = rows_by_id[item["query_id"]]
+        row = {
+            **item,
+            "decision": support_row["final_decision"],
+            "support": support_row["support"],
+        }
+        if row["answerable"] and row["decision"] == "ABSTAIN" and "false_refusal_type" not in row:
+            row["false_refusal_type"] = "SUPPORT_INSUFFICIENT"
+            row["expected_evidence"] = {
+                "chunk_ids": [],
+                "document_ids": [],
+                "model": "",
+                "error_code": "",
+                "section": "",
+            }
+        rows.append(row)
+    return _summarize_evidence(rows)
+
+
 def _calibration_report(queries: list[dict], documents: list[Document]) -> dict:
     documents_by_chunk = {str(item.metadata.get("chunk_id", "")): item for item in documents}
     before_rows, after_rows = [], []
@@ -624,6 +819,12 @@ def run_private_benchmark(manifest_path: Path) -> dict:
         if development_path.exists()
         else None
     )
+    support_calibration_path = manifest_path.parent / "annotations" / "v34_support_calibration.json"
+    support_calibration = (
+        load_support_calibration(support_calibration_path, manifest, ingested_chunk_ids)
+        if support_calibration_path.exists()
+        else None
+    )
     benchmark = {"documents": [{"content": item.page_content, "metadata": dict(item.metadata)} for item in ingested]}
     reranker = CrossEncoderReranker(RerankerConfig(enabled=True, candidate_k=5, top_k=3, device="cpu"))
     with ExitStack() as stack:
@@ -639,6 +840,21 @@ def run_private_benchmark(manifest_path: Path) -> dict:
             }
             if development else None
         )
+        support_candidate_rows, support_base_rows = (
+            _support_candidate_rows(support_calibration["queries"], ingested, reranker)
+            if support_calibration else (None, None)
+        )
+    frozen_support = _frozen_support_report(
+        manifest["queries"], reports["hybrid_rerank"], evidence, ingested,
+    )
+    support_calibration_report = (
+        _support_report(
+            support_calibration["queries"], support_candidate_rows,
+            support_base_rows, ingested,
+        )
+        if support_calibration else None
+    )
+    v34_evidence = _support_gate_evidence_summary(evidence, frozen_support)
     baseline_path = manifest_path.parent / "annotations" / "v32_final.json"
     baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else None
     over_filter = (
@@ -687,6 +903,8 @@ def run_private_benchmark(manifest_path: Path) -> dict:
             },
         } if baseline else {"status": "NOT_RUN"}),
         "evidence": evidence,
+        "v34_evidence": v34_evidence,
+        "support_frozen": frozen_support,
         "calibration": ({
             "name": calibration.get("name", "v3.2-private-calibration"),
             "documents": len(manifest["documents"]),
@@ -703,4 +921,12 @@ def run_private_benchmark(manifest_path: Path) -> dict:
             "hash": development_hash(development),
             "reports": development_reports,
         } if development else {"status": "NOT_RUN"}),
+        "support_calibration": ({
+            "name": support_calibration.get("name", "v3.4-evidence-support-calibration"),
+            "supported": sum(item["supported"] for item in support_calibration["queries"]),
+            "unsupported": sum(not item["supported"] for item in support_calibration["queries"]),
+            "total": len(support_calibration["queries"]),
+            "hash": support_calibration_hash(support_calibration),
+            **support_calibration_report,
+        } if support_calibration else {"status": "NOT_RUN"}),
     }

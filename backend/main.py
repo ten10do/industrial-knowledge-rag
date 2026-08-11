@@ -49,7 +49,7 @@ if __package__:
         snapshot_is_compatible,
     )
     from .security import create_rate_limiter, require_admin_token
-    from .retrieval import get_reranker
+    from .retrieval import get_reranker, support_gate_enabled, validate_evidence_support
     from .task_queue import create_job_id, create_task_queue
     from .version_sync import PublicVersionSynchronizer
     from .version_store import (
@@ -86,7 +86,7 @@ else:
         snapshot_is_compatible,
     )
     from security import create_rate_limiter, require_admin_token
-    from retrieval import get_reranker
+    from retrieval import get_reranker, support_gate_enabled, validate_evidence_support
     from task_queue import create_job_id, create_task_queue
     from version_sync import PublicVersionSynchronizer
     from version_store import (
@@ -138,6 +138,7 @@ else:
 
 DATA_DIR = rag_backend.DATA_DIR
 REFUSAL_MESSAGE = rag_backend.REFUSAL_MESSAGE
+SUPPORT_REFUSAL_MESSAGE = "知识库中存在相关资料，但没有足够证据支持所请求的具体信息。"
 build_knowledge_base = rag_backend.build_knowledge_base
 build_knowledge_base_incremental = getattr(
     rag_backend,
@@ -372,6 +373,7 @@ class AskResponse(BaseModel):
     sources: list[SourceItem]
     is_refused: bool
     evidence: dict | None = None
+    support: dict | None = None
     reranker: dict | None = None
     conversation_context: ConversationContext | None = None
 
@@ -1577,6 +1579,24 @@ def ask(
             sources = serialize_sources(docs)
             reranker_status = rerank_outcome.status()
 
+        support = None
+        if support_gate_enabled():
+            support = validate_evidence_support(
+                context_result.standalone_query,
+                docs,
+                getattr(raw_docs, "corpus_documents", []),
+            )
+            if support.status == "INSUFFICIENT":
+                return AskResponse(
+                    answer=SUPPORT_REFUSAL_MESSAGE,
+                    sources=[],
+                    is_refused=True,
+                    evidence=evidence.as_dict() if evidence else None,
+                    support=support.as_dict(),
+                    reranker=reranker_status,
+                    conversation_context=context_metadata,
+                )
+
         if request.history:
             answer = generate_answer(
                 request.question,
@@ -1598,6 +1618,7 @@ def ask(
             sources=sources,
             is_refused=False,
             evidence=evidence.as_dict() if evidence else None,
+            support=support.as_dict() if support else None,
             reranker=reranker_status,
             conversation_context=context_metadata,
         )
