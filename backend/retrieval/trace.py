@@ -37,6 +37,8 @@ class CandidateTrace:
     vector_distance: float | None = None
     fusion_rank: int | None = None
     fusion_score: float | None = None
+    candidate_source: str = "ORIGINAL_RETRIEVAL"
+    preservation_class: str = "NORMAL"
     section_candidate: bool = False
     section_rank: int | None = None
     section_expanded: bool = False
@@ -50,6 +52,7 @@ class CandidateTrace:
     pre_budget_priority: int | None = None
     budget_lane: str = ""
     budget_selected: bool | None = None
+    budget_reason: str = ""
     budget_reject_reason: str = ""
     identifier_protected: bool = False
     pre_rerank_rank: int | None = None
@@ -130,6 +133,7 @@ class RetrievalTrace:
             "lexical_score", "vector_rank", "fusion_score", "section_rank",
             "section_expanded", "neighbor_distance", "pre_rerank_rank",
             "rerank_score", "rerank_rank",
+            "candidate_source", "preservation_class",
         ):
             value = getattr(candidate, name, None)
             if value is not None:
@@ -190,13 +194,14 @@ class RetrievalTrace:
         item.pre_budget_priority = priority
         item.budget_lane = lane
         item.budget_selected = selected
+        item.budget_reason = reason or ("SELECTED" if selected else "UNKNOWN_DROP_REASON")
         item.budget_reject_reason = "" if selected else (reason or "UNKNOWN_DROP_REASON")
         item.identifier_protected = protected
         if protected and item.chunk_id not in self.identifier_protection["protected_candidates"]:
             self.identifier_protection["protected_candidates"].append(item.chunk_id)
             self.identifier_protection["protection_applied"] = True
         if selected:
-            self.event(candidate, "BUDGET_SELECTED", "BUDGET", lane=lane, priority=priority)
+            self.event(candidate, "BUDGET_SELECTED", "BUDGET", lane=lane, priority=priority, reason=item.budget_reason)
         else:
             self.drop(candidate, "BUDGET_REJECTED", "BUDGET", item.budget_reject_reason, lane=lane, priority=priority)
 

@@ -17,6 +17,9 @@ from .tokenizer import tokenize
 DEFAULT_SECTION_NEIGHBOR_WINDOW = 1
 DEFAULT_SECTION_CANDIDATE_K = 2
 DEFAULT_SECTION_MAX_EXPANDED = 3
+SECTION_MERGE_CURRENT = "current"
+SECTION_MERGE_RESERVED = "reserved_slots"
+SECTION_MERGE_APPEND = "append_then_rerank"
 
 
 @dataclass(frozen=True)
@@ -280,6 +283,19 @@ def _chunk_id(document: object) -> str:
     return str((getattr(document, "metadata", {}) or {}).get("chunk_id", ""))
 
 
+def _preservation_class(candidate: RetrievalCandidate, *, identifiers: tuple[str, ...]) -> str:
+    """Classify from retrieval evidence only; private labels never participate."""
+    if candidate.candidate_source == "SECTION_EXPANDED":
+        return "EXPANSION"
+    multi_source = candidate.lexical_rank is not None and candidate.vector_rank is not None
+    if (
+        (identifiers and candidate.exact_metadata_match)
+        or (candidate.identity_relation == IdentityRelation.EXACT_MODEL.value and multi_source)
+    ):
+        return "PROTECTED"
+    return "NORMAL"
+
+
 def expand_section_candidates(
     query: str,
     base_candidates: list[RetrievalCandidate],
@@ -289,6 +305,7 @@ def expand_section_candidates(
     budget: int,
     cache_key: str,
     config: SectionConfig,
+    merge_strategy: str = SECTION_MERGE_CURRENT,
     trace=None,
 ) -> tuple[list[RetrievalCandidate], SectionExpansionReport]:
     report = SectionExpansionReport(section_requested=config.enabled, section_effective=False)
@@ -319,6 +336,10 @@ def expand_section_candidates(
     base_by_id = {candidate.chunk_id: candidate for candidate in base_candidates}
     base_sections = defaultdict(list)
     for candidate in base_candidates:
+        candidate.candidate_source = "ORIGINAL_RETRIEVAL"
+        candidate.preservation_class = _preservation_class(
+            candidate, identifiers=tuple(getattr(scope_decision, "identifiers", ()) or ())
+        )
         identity = section_identity(candidate.document)
         base_sections[(identity.document_id, identity.normalized_section)].append(candidate)
         candidate.pre_section_rank = candidate.final_rank
@@ -331,6 +352,7 @@ def expand_section_candidates(
         existing = base_sections.get(key, [])
         if existing:
             anchor = min(existing, key=lambda item: item.final_rank or 10**9)
+            anchor.candidate_source = "BOTH"
             if trace:
                 trace.event(anchor, "SECTION_DUPLICATE", "SECTION_MERGE", section_rank=section_rank)
         else:
@@ -345,6 +367,8 @@ def expand_section_candidates(
                 continue
             anchor = RetrievalCandidate(document=scored[0][1], retrieval_source="section")
             anchor.section_expanded = True
+            anchor.candidate_source = "SECTION_EXPANDED"
+            anchor.preservation_class = "EXPANSION"
             anchor.scope_match = "primary"
             anchor.scope_level = scope_decision.tiers[0].level
             relations = {
@@ -407,6 +431,8 @@ def expand_section_candidates(
                     scope_match="primary",
                     scope_level=scope_decision.tiers[0].level,
                 )
+                neighbor.candidate_source = "SECTION_EXPANDED"
+                neighbor.preservation_class = "EXPANSION"
                 additions.append(neighbor)
                 seen.add(chunk_id)
                 if trace:
@@ -419,23 +445,33 @@ def expand_section_candidates(
                         score_breakdown=score_breakdown,
                     )
 
-    protected = []
-    anchor_ids = {anchor.chunk_id for anchor, _, _, _ in anchors}
-    for candidate in base_candidates:
-        if candidate.chunk_id in anchor_ids or (getattr(scope_decision, "identifiers", ()) and candidate.exact_metadata_match):
-            protected.append(candidate)
     identifier_protected_ids = {
         candidate.chunk_id for candidate in base_candidates
         if getattr(scope_decision, "identifiers", ()) and candidate.exact_metadata_match
     }
-    max_new = max(0, min(config.max_expanded, budget - len(protected)))
-    selected_additions = additions[:max_new]
-    keep_count = max(0, budget - len(selected_additions))
-    kept = []
-    for candidate in protected + base_candidates:
-        if candidate not in kept and len(kept) < keep_count:
-            kept.append(candidate)
-    merged = kept + selected_additions
+    if merge_strategy not in {SECTION_MERGE_CURRENT, SECTION_MERGE_RESERVED, SECTION_MERGE_APPEND}:
+        raise ValueError(f"Unknown section merge strategy: {merge_strategy}")
+    if merge_strategy == SECTION_MERGE_APPEND:
+        # Augment the original RRF budget; the reranker decides the final Top-K.
+        selected_originals = list(base_candidates[:budget])
+        selected_additions = additions[:min(config.max_expanded, 2)]
+    elif merge_strategy == SECTION_MERGE_RESERVED:
+        expansion_slots = min(config.max_expanded, 1, budget)
+        selected_originals = list(base_candidates[:budget - expansion_slots])
+        selected_additions = additions[:expansion_slots]
+    else:
+        protected = [
+            candidate for candidate in base_candidates
+            if candidate.candidate_source == "BOTH" or candidate.chunk_id in identifier_protected_ids
+        ]
+        max_new = max(0, min(config.max_expanded, budget - len(protected)))
+        selected_additions = additions[:max_new]
+        keep_count = max(0, budget - len(selected_additions))
+        selected_originals = []
+        for candidate in protected + base_candidates:
+            if candidate not in selected_originals and len(selected_originals) < keep_count:
+                selected_originals.append(candidate)
+    merged = [*selected_originals, *selected_additions]
     for rank, candidate in enumerate(merged, start=1):
         candidate.final_rank = rank
     report.section_effective = True
@@ -448,15 +484,16 @@ def expand_section_candidates(
         trace.mark_stage("SECTION_MERGE", [*base_candidates, *additions])
         merged_ids = {candidate.chunk_id for candidate in merged}
         ordered = []
-        for candidate in [*protected, *base_candidates, *additions]:
+        for candidate in [*base_candidates, *additions]:
             if candidate not in ordered:
                 ordered.append(candidate)
         for priority, candidate in enumerate(ordered, start=1):
             is_addition = candidate in additions
             selected = candidate.chunk_id in merged_ids
-            reason = ""
-            if not selected:
-                reason = "GLOBAL_BUDGET_DISPLACED" if is_addition else "SECTION_BUDGET_DISPLACED"
+            if selected:
+                reason = "EXPANSION_SLOT" if is_addition else "ORIGINAL_RESERVED"
+            else:
+                reason = "EXPANSION_BUDGET_FULL" if is_addition else "ORIGINAL_BUDGET_FULL"
             trace.budget(
                 candidate,
                 selected=selected,

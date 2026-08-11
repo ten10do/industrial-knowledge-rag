@@ -13,6 +13,8 @@ from backend.retrieval import (
     normalize_section,
     validate_evidence_support,
 )
+from backend.retrieval.section import SECTION_MERGE_APPEND, SECTION_MERGE_RESERVED
+from backend.retrieval.trace import RetrievalTrace
 
 
 def _doc(chunk_id, content, *, model="Drive 100", section="Chapter 5 Commissioning", index=0):
@@ -157,3 +159,49 @@ def test_section_candidates_recover_support_without_false_support():
     guard = validate_evidence_support(unsupported_query, guard_result, [network])
     assert guard.status == "INSUFFICIENT"
     assert "protocol:profinet" in guard.missing_requirements
+
+
+def test_append_merge_preserves_original_budget_and_admits_section_recovery():
+    base = [_doc(f"base-{index}", "unrelated reference", index=index) for index in range(5)]
+    recovered = _doc("recovered", "configure startup commissioning", section="Commissioning", index=9)
+    documents = [*base, recovered]
+    analysis = analyze_query("Drive 100 configure startup", documents)
+    scope = build_retrieval_scope("Drive 100 configure startup", documents, analysis)
+    candidates = [RetrievalCandidate(document=item, retrieval_source="hybrid", final_rank=index)
+                  for index, item in enumerate(base, 1)]
+    trace = RetrievalTrace("Drive 100 configure startup")
+    result, _ = expand_section_candidates(
+        "Drive 100 configure startup", candidates, documents, scope, budget=5,
+        cache_key="append-preservation", config=SectionConfig(True, 0, 1, 2),
+        merge_strategy=SECTION_MERGE_APPEND, trace=trace,
+    )
+    assert [item.chunk_id for item in result] == [*(item.metadata["chunk_id"] for item in base), "recovered"]
+    payload = {item["chunk_id"]: item for item in trace.as_dict()["candidates"]}
+    assert payload["base-4"]["budget_selected"] is True
+    assert payload["base-4"]["budget_reason"] == "ORIGINAL_RESERVED"
+    assert payload["recovered"]["budget_reason"] == "EXPANSION_SLOT"
+    assert trace.as_dict()["displacements"] == []
+
+
+def test_reserved_merge_emits_explicit_displacement_and_deduplicates_both_source():
+    base = [_doc(f"base-{index}", "unrelated reference", index=index) for index in range(5)]
+    anchor = _doc("anchor", "configure startup commissioning", section="Commissioning", index=9)
+    documents = [*base, anchor]
+    analysis = analyze_query("Drive 100 configure startup", documents)
+    scope = build_retrieval_scope("Drive 100 configure startup", documents, analysis)
+    candidates = [
+        RetrievalCandidate(document=anchor, retrieval_source="hybrid", final_rank=1),
+        *[RetrievalCandidate(document=item, retrieval_source="hybrid", final_rank=index + 2)
+          for index, item in enumerate(base)],
+    ]
+    trace = RetrievalTrace("Drive 100 configure startup")
+    result, _ = expand_section_candidates(
+        "Drive 100 configure startup", candidates, documents, scope, budget=5,
+        cache_key="reserved-both", config=SectionConfig(True, 0, 1, 1),
+        merge_strategy=SECTION_MERGE_RESERVED, trace=trace,
+    )
+    assert len({item.chunk_id for item in result}) == len(result)
+    payload = {item["chunk_id"]: item for item in trace.as_dict()["candidates"]}
+    assert payload["anchor"]["candidate_source"] == "BOTH"
+    assert payload["base-4"]["budget_selected"] is False
+    assert payload["base-4"]["budget_reject_reason"] == "ORIGINAL_BUDGET_FULL"

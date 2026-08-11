@@ -454,8 +454,10 @@ def _run_mode(
     reranker,
     *,
     trace_enabled: bool = False,
+    section_strategy: str = "current",
+    candidate_k: int = 5,
 ) -> dict:
-    rows, latencies, rerank_rows = [], [], []
+    rows, latencies, rerank_rows, reranker_candidate_counts = [], [], [], []
     section_enabled = mode == "hybrid_section_rerank"
     with _section_mode(section_enabled):
         for query in queries:
@@ -466,11 +468,12 @@ def _run_mode(
             else:
                 retrieval_mode = "hybrid" if mode in {"hybrid_rerank", "hybrid_section_rerank"} else mode
                 result = rag_core.retrieve_docs(
-                    query["query"], k=5,
+                    query["query"], k=candidate_k,
                     knowledge_base_id=FULL_BENCHMARK_KNOWLEDGE_BASE_ID,
                     retrieval_mode=retrieval_mode,
                     trace_enabled=trace_enabled,
                     trace_query_id=query["query_id"],
+                    section_merge_strategy=section_strategy if section_enabled else None,
                 )
                 candidates = rag_core.filter_relevant_docs(result)
             before = _candidate_rows(candidates.candidates)
@@ -487,6 +490,7 @@ def _run_mode(
             before_rank = rank_of(before, query["relevant_chunk_ids"])
             rank = rank_of(candidate_rows, query["relevant_chunk_ids"])
             if outcome:
+                reranker_candidate_counts.append(outcome.candidate_count)
                 rerank_rows.append({
                     "query_id": query["query_id"], "before_rank": before_rank, "after_rank": rank,
                     "answerable": query["answerable"],
@@ -511,6 +515,7 @@ def _run_mode(
     report["latency_ms_p95"] = sorted(latencies)[max(0, round(len(latencies) * .95) - 1)]
     if rerank_rows:
         report["rerank_analysis"] = _rerank_analysis(rerank_rows)
+        report["reranker_candidate_count_median"] = statistics.median(reranker_candidate_counts)
     return report
 
 

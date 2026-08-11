@@ -127,7 +127,10 @@ def test_section_trace_records_provenance_budget_reject_and_displacement():
     candidates = {item["chunk_id"]: item for item in payload["candidates"]}
     assert candidates["expanded"]["expansion_type"] == "SECTION_INDEX_MATCH"
     assert candidates["expanded"]["section_score_breakdown"]["total"] > 0
-    assert candidates["base-4"]["budget_reject_reason"] == "SECTION_BUDGET_DISPLACED"
+    assert candidates["base-4"]["budget_reject_reason"] == "ORIGINAL_BUDGET_FULL"
+    assert candidates["expanded"]["candidate_source"] == "SECTION_EXPANDED"
+    assert candidates["expanded"]["preservation_class"] == "EXPANSION"
+    assert candidates["expanded"]["budget_reason"] == "EXPANSION_SLOT"
     assert payload["displacements"][0] == {
         "displaced_chunk": "base-4",
         "replacement_chunk": "expanded",

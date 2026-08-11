@@ -150,6 +150,34 @@ def _section_candidate_metrics(traces: dict[str, dict]) -> dict:
     }
 
 
+def _preservation_metrics(traces: dict[str, dict]) -> dict:
+    originals = []
+    expansions = []
+    for trace in traces.values():
+        for candidate in trace.get("candidates", []):
+            if candidate.get("candidate_source") in {"ORIGINAL_RETRIEVAL", "BOTH"} and candidate.get("pre_budget_rank"):
+                originals.append(candidate)
+            if candidate.get("candidate_source") == "SECTION_EXPANDED":
+                expansions.append(candidate)
+
+    original_top_k = [item for item in originals if item.get("pre_budget_rank", 0) <= 5]
+    original_relevant = [item for item in originals if item.get("is_relevant") is True]
+    admitted = [item for item in expansions if item.get("budget_selected") is True]
+    recovered = [item for item in expansions if item.get("is_relevant") is True and item.get("final_selected")]
+    return {
+        "original_top_k_survival_rate": (
+            sum(item.get("budget_selected") is True for item in original_top_k) / len(original_top_k)
+            if original_top_k else 0.0
+        ),
+        "original_relevant_survival_rate": (
+            sum(item.get("budget_selected") is True for item in original_relevant) / len(original_relevant)
+            if original_relevant else 0.0
+        ),
+        "expansion_admission_rate": len(admitted) / len(expansions) if expansions else 0.0,
+        "expansion_recovery_count": len(recovered),
+    }
+
+
 def analyze_observability(queries: list[dict], baseline_report: dict, section_report: dict) -> dict:
     query_by_id = {item["query_id"]: item for item in queries}
     baseline_rows = {item["query_id"]: item for item in baseline_report.get("rows", [])}
@@ -253,6 +281,7 @@ def analyze_observability(queries: list[dict], baseline_report: dict, section_re
             "rows": displacements,
         },
         "section_candidate_precision": section_candidates,
+        "preservation": _preservation_metrics(section_traces),
         "budget_reject_relevant_count": relevant_rejected,
         "reranker_drop_relevant_count": reranker_drops,
         "scope_drop_relevant_count": scope_drops,

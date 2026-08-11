@@ -517,6 +517,7 @@ def retrieve_docs(
     *,
     trace_enabled: bool | None = None,
     trace_query_id: str = "",
+    section_merge_strategy: str | None = None,
 ):
     if not question or not question.strip():
         raise ValueError("问题不能为空。")
@@ -606,6 +607,7 @@ def retrieve_docs(
                 budget=k,
                 cache_key=knowledge_base_id,
                 config=section_config,
+                merge_strategy=section_merge_strategy or "append_then_rerank",
                 trace=trace,
             )
     for rank, candidate in enumerate(candidates, start=1):

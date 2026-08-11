@@ -26,6 +26,8 @@ class RetrievalCandidate:
     neighbor_distance: int | None = None
     pre_section_rank: int | None = None
     section_candidate_source: str = ""
+    candidate_source: str = "ORIGINAL_RETRIEVAL"
+    preservation_class: str = "NORMAL"
 
     @property
     def metadata(self) -> dict:
