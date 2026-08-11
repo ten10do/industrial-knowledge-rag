@@ -127,6 +127,7 @@ class CrossEncoderReranker:
 
     def rerank(self, query: str, result: RetrievalResult, top_k: int | None = None) -> RerankOutcome:
         candidates = list(getattr(result, "candidates", []) or [])
+        trace = getattr(result, "trace", None)
         output_k = top_k or self.config.top_k
         if output_k <= 0:
             raise ValueError("Rerank top_k must be positive.")
@@ -139,17 +140,37 @@ class CrossEncoderReranker:
                 retrieval_mode=getattr(result, "retrieval_mode", ""),
                 scope_decision=getattr(result, "scope_decision", None),
                 section_report=getattr(result, "section_report", None),
+                trace=trace,
             )
 
+        def record_selection(selected: list) -> None:
+            if not trace:
+                return
+            selected_ids = {candidate.chunk_id for candidate in selected}
+            for candidate in candidates:
+                if candidate.chunk_id in selected_ids:
+                    trace.event(candidate, "RERANK_SELECTED", "RERANK", rank=candidate.rerank_rank)
+                else:
+                    trace.drop(
+                        candidate, "RERANK_DROPPED", "RERANK", "RERANK_TRUNCATED",
+                        rank=candidate.rerank_rank,
+                    )
+            trace.mark_stage("RERANK", selected)
+
         if not self.requested:
+            if trace:
+                trace.mark_stage("RERANK", candidates)
             return RerankOutcome(result, False, False, candidate_count=len(candidates), output_count=len(candidates))
         if self.configuration_error:
             original = subset(candidates[:output_k])
+            record_selection(original.candidates)
             return RerankOutcome(
                 original, True, False, self.configuration_error,
                 self.config.model_name, len(candidates), len(original.candidates),
             )
         if not candidates:
+            if trace:
+                trace.mark_stage("RERANK", [])
             return RerankOutcome(
                 result, True, True, model=self.config.model_name,
                 candidate_count=0, output_count=0,
@@ -179,12 +200,14 @@ class CrossEncoderReranker:
                 if rank <= output_k:
                     ranked.append(candidate)
             reranked = subset(ranked)
+            record_selection(ranked)
             return RerankOutcome(
                 reranked, True, True, model=self.config.model_name,
                 candidate_count=len(candidates), output_count=len(ranked),
             )
         except Exception as exc:
             original = subset(candidates[:output_k])
+            record_selection(original.candidates)
             return RerankOutcome(
                 original, True, False, f"Reranker unavailable: {exc}",
                 self.config.model_name, len(candidates), len(original.candidates),

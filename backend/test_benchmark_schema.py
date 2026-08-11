@@ -10,6 +10,7 @@ from backend.evaluation.benchmark_runner import CHALLENGE_PATH, run_dataset
 from backend.evaluation.benchmark_schema import FAILURE_TYPES, classify_failure, evaluate_rows, load_manifest
 from backend.evaluation.private_benchmark import (
     _candidate_rows,
+    _measure_trace_overhead,
     _resolve_local_file,
     _rerank_analysis,
     _query_for_schema,
@@ -25,6 +26,7 @@ from backend.evaluation.private_benchmark import (
     load_private_manifest,
     support_calibration_hash,
 )
+from backend.retrieval import RetrievalResult
 
 
 def test_private_schema_adapter_defaults_optional_identifier_label():
@@ -102,6 +104,29 @@ def test_support_recovery_uses_answerable_when_supported_label_is_absent():
     assert report["recoverable_count"] == 1
     assert report["recovered_count"] == 1
     assert report["support_recovery_rate"] == 1.0
+
+
+def test_trace_overhead_measurement_does_not_require_ood_queries(monkeypatch):
+    empty = RetrievalResult([])
+    monkeypatch.setattr(
+        "backend.evaluation.private_benchmark.rag_core.retrieve_docs",
+        lambda *args, **kwargs: empty,
+    )
+    monkeypatch.setattr(
+        "backend.evaluation.private_benchmark.rag_core.filter_relevant_docs",
+        lambda result: result,
+    )
+    reranker = SimpleNamespace(rerank=lambda *args, **kwargs: SimpleNamespace(result=empty))
+    queries = [
+        {"query_id": f"q{index}", "query": "answerable", "answerable": True}
+        for index in range(3)
+    ]
+
+    report = _measure_trace_overhead(queries, None, None, reranker)
+
+    assert report["sample_count"] == 3
+    assert report["off_median_ms"] >= 0
+    assert report["on_median_ms"] >= 0
 
 
 def test_challenge_manifest_has_required_coverage():

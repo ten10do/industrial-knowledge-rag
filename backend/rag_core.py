@@ -15,14 +15,14 @@ if __package__:
     from .ingestion import PageText, ingest_pages
     from .learning_content import generate_hierarchical_learning_content
     from .llm_client import generate_llm_answer
-    from .retrieval import RetrievalCandidate, RetrievalResult, SectionExpansionReport, analyze_query, analyze_retrieval_evidence, build_retrieval_scope, collect_scoped_candidates, expand_section_candidates, load_section_config, rrf_fuse
+    from .retrieval import RetrievalCandidate, RetrievalResult, SectionExpansionReport, analyze_query, analyze_retrieval_evidence, build_retrieval_scope, collect_scoped_candidates, create_trace, expand_section_candidates, load_section_config, rrf_fuse
     from .retrieval.bm25 import BM25Index
     from .retrieval.filters import has_exact_metadata_match
 else:
     from ingestion import PageText, ingest_pages
     from learning_content import generate_hierarchical_learning_content
     from llm_client import generate_llm_answer
-    from retrieval import RetrievalCandidate, RetrievalResult, SectionExpansionReport, analyze_query, analyze_retrieval_evidence, build_retrieval_scope, collect_scoped_candidates, expand_section_candidates, load_section_config, rrf_fuse
+    from retrieval import RetrievalCandidate, RetrievalResult, SectionExpansionReport, analyze_query, analyze_retrieval_evidence, build_retrieval_scope, collect_scoped_candidates, create_trace, expand_section_candidates, load_section_config, rrf_fuse
     from retrieval.bm25 import BM25Index
     from retrieval.filters import has_exact_metadata_match
 
@@ -514,6 +514,9 @@ def retrieve_docs(
     k: int = 4,
     knowledge_base_id: str = "default",
     retrieval_mode: str | None = None,
+    *,
+    trace_enabled: bool | None = None,
+    trace_query_id: str = "",
 ):
     if not question or not question.strip():
         raise ValueError("问题不能为空。")
@@ -522,10 +525,13 @@ def retrieve_docs(
     analysis = analyze_query(question, documents)
     mode = get_retrieval_mode(retrieval_mode)
     scope = build_retrieval_scope(question, documents, analysis)
+    trace = create_trace(question, trace_query_id, trace_enabled)
+    if trace:
+        trace.configure_query(analysis, scope)
     if analysis.identifiers and not scope.identifier_found:
         return RetrievalResult(
             [], query_analysis=analysis, corpus_documents=all_documents,
-            retrieval_mode=mode, scope_decision=scope,
+            retrieval_mode=mode, scope_decision=scope, trace=trace,
         )
     lexical_k = _positive_int("LEXICAL_TOP_K", DEFAULT_LEXICAL_TOP_K)
     vector_k = _positive_int("VECTOR_TOP_K", DEFAULT_VECTOR_TOP_K)
@@ -533,10 +539,16 @@ def retrieve_docs(
         scope,
         lexical_k,
         lambda scoped, limit: _lexical_candidates(question, scoped, analysis, limit),
+        trace=trace,
     )
     for rank, candidate in enumerate(lexical, start=1):
         candidate.lexical_rank = rank
+        if trace:
+            trace.event(candidate, "RETRIEVED_BM25", "RETRIEVAL", rank=rank)
     if mode == "lexical":
+        if trace:
+            trace.mark_stage("RETRIEVAL", lexical)
+            trace.mark_stage("SCOPE", lexical)
         candidates = lexical[:k]
     else:
         try:
@@ -550,13 +562,23 @@ def retrieve_docs(
                     limit,
                     None if len(scoped) == len(all_documents) else scoped,
                 ),
+                trace=trace,
             )
             for rank, candidate in enumerate(vector, start=1):
                 candidate.vector_rank = rank
+                if trace:
+                    trace.event(candidate, "RETRIEVED_VECTOR", "RETRIEVAL", rank=rank)
         except Exception:
             if mode == "vector":
                 raise
             vector = []
+        if trace:
+            retrieved = []
+            for candidate in [*lexical, *vector]:
+                if candidate.chunk_id not in {item.chunk_id for item in retrieved}:
+                    retrieved.append(candidate)
+            trace.mark_stage("RETRIEVAL", retrieved)
+            trace.mark_stage("SCOPE", retrieved)
         candidates = (
             vector[:k]
             if mode == "vector"
@@ -564,6 +586,7 @@ def retrieve_docs(
                 lexical, vector,
                 rrf_k=_positive_int("RRF_K", DEFAULT_RRF_K),
                 top_k=min(k, _positive_int("HYBRID_TOP_K", DEFAULT_HYBRID_TOP_K)),
+                trace=trace,
             )
         )
     section_report = None
@@ -571,6 +594,9 @@ def retrieve_docs(
         section_config, section_error = load_section_config()
         if section_error:
             section_report = SectionExpansionReport(True, False, section_error)
+            if trace:
+                trace.mark_stage("SECTION_MERGE", candidates)
+                trace.mark_stage("BUDGET", candidates)
         else:
             candidates, section_report = expand_section_candidates(
                 question,
@@ -580,13 +606,14 @@ def retrieve_docs(
                 budget=k,
                 cache_key=knowledge_base_id,
                 config=section_config,
+                trace=trace,
             )
     for rank, candidate in enumerate(candidates, start=1):
         candidate.final_rank = rank
     return RetrievalResult(
         candidates, query_analysis=analysis,
         corpus_documents=all_documents, retrieval_mode=mode, scope_decision=scope,
-        section_report=section_report,
+        section_report=section_report, trace=trace,
     )
 
 
@@ -622,23 +649,32 @@ def get_relevance_threshold() -> float:
 def filter_relevant_docs(scored_docs):
     candidates = getattr(scored_docs, "candidates", None)
     if candidates is not None:
-        return RetrievalResult([
-            candidate for candidate in candidates
-            if candidate.section_expanded
-            or candidate.exact_metadata_match
-            or (
-                candidate.lexical_score is not None
-                and candidate.lexical_score > 0
+        selected = []
+        trace = getattr(scored_docs, "trace", None)
+        for candidate in candidates:
+            keep = (
+                candidate.section_expanded
+                or candidate.exact_metadata_match
+                or (candidate.lexical_score is not None and candidate.lexical_score > 0)
+                or (
+                    candidate.vector_score is not None
+                    and candidate.evidence_score <= get_relevance_threshold()
+                )
             )
-            or (
-                candidate.vector_score is not None
-                and candidate.evidence_score <= get_relevance_threshold()
-            )
-        ], query_analysis=getattr(scored_docs, "query_analysis", None),
+            if keep:
+                selected.append(candidate)
+                if trace:
+                    trace.event(candidate, "EVIDENCE_SELECTED", "EVIDENCE")
+            elif trace:
+                trace.drop(candidate, "EVIDENCE_FILTERED", "EVIDENCE", "EVIDENCE_FILTERED")
+        if trace:
+            trace.mark_stage("EVIDENCE", selected)
+        return RetrievalResult(selected, query_analysis=getattr(scored_docs, "query_analysis", None),
             corpus_documents=getattr(scored_docs, "corpus_documents", []),
             retrieval_mode=getattr(scored_docs, "retrieval_mode", ""),
             scope_decision=getattr(scored_docs, "scope_decision", None),
-            section_report=getattr(scored_docs, "section_report", None))
+            section_report=getattr(scored_docs, "section_report", None),
+            trace=trace)
     threshold = get_relevance_threshold()
     return [
         (document, score)

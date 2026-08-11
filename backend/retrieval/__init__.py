@@ -28,6 +28,14 @@ from .section import (
     normalize_section,
     section_identity,
 )
+from .trace import (
+    CandidateDisplacement,
+    CandidateEvent,
+    CandidateTrace,
+    RetrievalTrace,
+    create_trace,
+    tracing_enabled,
+)
 
 __all__ = [
     "BM25Index",
@@ -68,4 +76,10 @@ __all__ = [
     "load_section_config",
     "normalize_section",
     "section_identity",
+    "CandidateDisplacement",
+    "CandidateEvent",
+    "CandidateTrace",
+    "RetrievalTrace",
+    "create_trace",
+    "tracing_enabled",
 ]

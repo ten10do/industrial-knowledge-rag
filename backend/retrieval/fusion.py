@@ -13,6 +13,7 @@ def rrf_fuse(
     *,
     rrf_k: int = 60,
     top_k: int = 5,
+    trace=None,
 ) -> list[RetrievalCandidate]:
     merged: dict[str, RetrievalCandidate] = {}
     for source, candidates in (("lexical", lexical), ("vector", vector)):
@@ -35,6 +36,8 @@ def rrf_fuse(
                 )
                 merged[key] = current
             elif source == "vector":
+                if trace:
+                    trace.event(candidate, "DEDUPLICATED", "RRF", merged_with=key)
                 current.vector_rank = candidate.vector_rank
                 current.vector_score = candidate.vector_score
                 current.evidence_score = candidate.evidence_score
@@ -47,14 +50,25 @@ def rrf_fuse(
             current.fusion_score = (current.fusion_score or 0.0) + 1.0 / (rrf_k + rank)
             if source not in current.retrieval_source.split("+"):
                 current.retrieval_source = "+".join(sorted((*current.retrieval_source.split("+"), source)))
-    ranked = sorted(
+    all_ranked = sorted(
         merged.values(),
         key=lambda item: (
             {"primary": 0, "none": 1, "fallback": 2}.get(item.scope_match, 1),
             -(item.fusion_score or 0.0),
             item.chunk_id,
         ),
-    )[:top_k]
+    )
+    ranked = all_ranked[:top_k]
+    if trace:
+        for fusion_rank, candidate in enumerate(all_ranked, start=1):
+            item = trace.event(candidate, "MERGED_RRF", "RRF", fusion_rank=fusion_rank)
+            item.fusion_rank = fusion_rank
+            if fusion_rank > top_k:
+                trace.drop(
+                    candidate, "BUDGET_REJECTED", "RRF", "GLOBAL_BUDGET_DISPLACED",
+                    fusion_rank=fusion_rank,
+                )
+        trace.mark_stage("RRF", ranked)
     for rank, candidate in enumerate(ranked, start=1):
         candidate.final_rank = rank
         candidate.retrieval_source = "hybrid" if "+" in candidate.retrieval_source else candidate.retrieval_source

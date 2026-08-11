@@ -48,6 +48,7 @@ class RetrievalResult(list):
         retrieval_mode: str = "",
         scope_decision=None,
         section_report=None,
+        trace=None,
     ):
         self.candidates = candidates
         self.query_analysis = query_analysis
@@ -55,4 +56,5 @@ class RetrievalResult(list):
         self.retrieval_mode = retrieval_mode
         self.scope_decision = scope_decision
         self.section_report = section_report
+        self.trace = trace
         super().__init__((candidate.document, candidate.evidence_score) for candidate in candidates)

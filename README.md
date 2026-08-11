@@ -259,3 +259,23 @@ Expanded candidates retain the original lexical/vector/fusion ranks and expose
 the existing reranker candidate budget. Missing or unusable section metadata
 falls back to the original retrieval path and reports the reason. The reranker
 and Support Gate remain independently configuration-gated and production-off.
+
+## V3.6 Retrieval Observability
+
+V3.6 adds disabled-by-default, evaluation-oriented tracing for candidate
+lifecycle analysis. It records actual BM25/vector ranks, scope decisions, RRF
+fusion, section provenance and score components, budget selection/rejection,
+reranker truncation, final context, and explicit drop reasons. The collector is
+side-channel instrumentation: it is never read by ranking or support logic, and
+a benchmark equivalence guard fails if tracing changes final candidate IDs.
+
+```text
+RETRIEVAL_TRACE_ENABLED=false
+```
+
+Private benchmark labels (`is_relevant`, `is_expected_section`, and
+`is_expected_model`) are applied only by the evaluation overlay. Full candidate,
+query, and displacement traces are written under the ignored private runtime
+directory `backend/evaluation/benchmark_private/annotations/v36_runtime/` and
+must not be committed. The normal `/ask` response does not return the full
+trace.

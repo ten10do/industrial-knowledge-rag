@@ -243,9 +243,15 @@ class SectionIndex:
         for record in allowed_records:
             chunk_scores = sorted((_overlap(tokens, concepts) for tokens in record.chunk_tokens), reverse=True)
             padded = chunk_scores[:3] + [0.0, 0.0, 0.0]
-            score = 1.5 * _overlap(record.title_tokens, concepts) + padded[0] + .3 * padded[1] + .1 * padded[2]
+            title_match = 1.5 * _overlap(record.title_tokens, concepts)
+            representative_match = padded[0] + .3 * padded[1] + .1 * padded[2]
+            score = title_match + representative_match
             if score > 0:
-                ranked.append((score, record, chunk_scores))
+                ranked.append((score, record, chunk_scores, {
+                    "title_match": title_match,
+                    "representative_chunk_match": representative_match,
+                    "total": score,
+                }))
         ranked.sort(key=lambda item: (-item[0], item[1].identity.document_id, item[1].identity.normalized_section))
         return ranked[:candidate_k], hint
 
@@ -283,21 +289,31 @@ def expand_section_candidates(
     budget: int,
     cache_key: str,
     config: SectionConfig,
+    trace=None,
 ) -> tuple[list[RetrievalCandidate], SectionExpansionReport]:
     report = SectionExpansionReport(section_requested=config.enabled, section_effective=False)
     if not config.enabled:
         report.section_fallback_reason = "disabled"
+        if trace:
+            trace.mark_stage("SECTION_MERGE", base_candidates)
+            trace.mark_stage("BUDGET", base_candidates)
         return base_candidates, report
     primary_documents = list(scope_decision.tiers[0].documents) if getattr(scope_decision, "tiers", ()) else []
     allowed_ids = {_chunk_id(document) for document in primary_documents if _chunk_id(document)}
     if not allowed_ids:
         report.section_fallback_reason = "no_allowed_scope_documents"
+        if trace:
+            trace.mark_stage("SECTION_MERGE", base_candidates)
+            trace.mark_stage("BUDGET", base_candidates)
         return base_candidates, report
     index = _section_index(cache_key, corpus_documents)
     ranked_sections, hint = index.select(query, allowed_ids, config.candidate_k)
     report.hint = hint
     if not ranked_sections:
         report.section_fallback_reason = "section_metadata_unavailable"
+        if trace:
+            trace.mark_stage("SECTION_MERGE", base_candidates)
+            trace.mark_stage("BUDGET", base_candidates)
         return base_candidates, report
 
     base_by_id = {candidate.chunk_id: candidate for candidate in base_candidates}
@@ -310,11 +326,13 @@ def expand_section_candidates(
     anchors = []
     new_candidates = []
     selected_records = []
-    for section_rank, (score, record, _) in enumerate(ranked_sections, start=1):
+    for section_rank, (score, record, _, score_breakdown) in enumerate(ranked_sections, start=1):
         key = (record.identity.document_id, record.identity.normalized_section)
         existing = base_sections.get(key, [])
         if existing:
             anchor = min(existing, key=lambda item: item.final_rank or 10**9)
+            if trace:
+                trace.event(anchor, "SECTION_DUPLICATE", "SECTION_MERGE", section_rank=section_rank)
         else:
             concepts = set(hint.preferred_concepts)
             scored = [
@@ -340,13 +358,23 @@ def expand_section_candidates(
             new_candidates.append(anchor)
         anchor.section_rank = section_rank
         anchor.section_candidate_source = "section_retrieval"
-        anchors.append((anchor, record))
+        anchors.append((anchor, record, score, score_breakdown))
         selected_records.append({
             "rank": section_rank,
             "document_id": record.identity.document_id,
             "normalized_section": record.identity.normalized_section,
             "score": score,
+            "score_breakdown": score_breakdown,
         })
+        if trace and anchor.section_expanded:
+            trace.section_candidate(
+                anchor,
+                origin_chunk_id=anchor.chunk_id,
+                origin_rank=section_rank,
+                expansion_type="SECTION_INDEX_MATCH",
+                score=score,
+                score_breakdown=score_breakdown,
+            )
 
     # New section anchors take precedence; neighbors are round-robin by distance.
     additions = []
@@ -357,7 +385,7 @@ def expand_section_candidates(
             seen.add(candidate.chunk_id)
     for distance in range(1, config.neighbor_window + 1):
         for direction in (-1, 1):
-            for anchor, record in anchors:
+            for anchor, record, score, score_breakdown in anchors:
                 anchor_index = next((index for index, document in enumerate(record.documents) if _chunk_id(document) == anchor.chunk_id), None)
                 if anchor_index is None:
                     continue
@@ -381,12 +409,25 @@ def expand_section_candidates(
                 )
                 additions.append(neighbor)
                 seen.add(chunk_id)
+                if trace:
+                    trace.section_candidate(
+                        neighbor,
+                        origin_chunk_id=anchor.chunk_id,
+                        origin_rank=anchor.pre_section_rank or anchor.final_rank,
+                        expansion_type="SAME_SECTION_NEIGHBOR",
+                        score=score,
+                        score_breakdown=score_breakdown,
+                    )
 
     protected = []
-    anchor_ids = {anchor.chunk_id for anchor, _ in anchors}
+    anchor_ids = {anchor.chunk_id for anchor, _, _, _ in anchors}
     for candidate in base_candidates:
         if candidate.chunk_id in anchor_ids or (getattr(scope_decision, "identifiers", ()) and candidate.exact_metadata_match):
             protected.append(candidate)
+    identifier_protected_ids = {
+        candidate.chunk_id for candidate in base_candidates
+        if getattr(scope_decision, "identifiers", ()) and candidate.exact_metadata_match
+    }
     max_new = max(0, min(config.max_expanded, budget - len(protected)))
     selected_additions = additions[:max_new]
     keep_count = max(0, budget - len(selected_additions))
@@ -402,4 +443,30 @@ def expand_section_candidates(
     report.section_candidates_added = len(selected_additions)
     report.candidate_budget_overflow = max(0, len(additions) - len(selected_additions))
     report.selected_sections = selected_records
+    if trace:
+        trace.section_hint = report.as_dict()["hint"]
+        trace.mark_stage("SECTION_MERGE", [*base_candidates, *additions])
+        merged_ids = {candidate.chunk_id for candidate in merged}
+        ordered = []
+        for candidate in [*protected, *base_candidates, *additions]:
+            if candidate not in ordered:
+                ordered.append(candidate)
+        for priority, candidate in enumerate(ordered, start=1):
+            is_addition = candidate in additions
+            selected = candidate.chunk_id in merged_ids
+            reason = ""
+            if not selected:
+                reason = "GLOBAL_BUDGET_DISPLACED" if is_addition else "SECTION_BUDGET_DISPLACED"
+            trace.budget(
+                candidate,
+                selected=selected,
+                priority=priority,
+                lane=("SECTION" if is_addition else "BASE"),
+                reason=reason,
+                protected=candidate.chunk_id in identifier_protected_ids,
+            )
+        dropped_base = [candidate for candidate in base_candidates if candidate.chunk_id not in merged_ids]
+        for displaced, replacement in zip(dropped_base, selected_additions):
+            trace.displacement(displaced, replacement, "SECTION_BUDGET_DISPLACED")
+        trace.mark_stage("BUDGET", merged)
     return merged, report

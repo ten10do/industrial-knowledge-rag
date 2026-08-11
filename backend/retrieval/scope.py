@@ -191,7 +191,7 @@ def build_retrieval_scope(question: str, documents: list, analysis: QueryAnalysi
     return decision
 
 
-def collect_scoped_candidates(decision: RetrievalScopeDecision, top_k: int, retrieve) -> list:
+def collect_scoped_candidates(decision: RetrievalScopeDecision, top_k: int, retrieve, *, trace=None) -> list:
     """Fill a channel's candidate pool tier-by-tier, preserving primary eligibility."""
     selected, seen = [], set()
     for tier_index, tier in enumerate(decision.tiers):
@@ -202,6 +202,8 @@ def collect_scoped_candidates(decision: RetrievalScopeDecision, top_k: int, retr
         for candidate in candidates:
             key = candidate.chunk_id or str(id(candidate.document))
             if key in seen:
+                if trace:
+                    trace.drop(candidate, "DEDUPLICATED", "SCOPE", "DEDUPLICATED")
                 continue
             candidate.scope_match = "primary" if tier_index == 0 else "fallback"
             candidate.scope_level = tier.level
@@ -222,6 +224,8 @@ def collect_scoped_candidates(decision: RetrievalScopeDecision, top_k: int, retr
                 IdentityRelation.UNKNOWN.value,
             )
             selected.append(candidate)
+            if trace:
+                trace.event(candidate, "SCOPE_ACCEPTED", "SCOPE", tier=tier.level)
             seen.add(key)
             if len(selected) == top_k:
                 break

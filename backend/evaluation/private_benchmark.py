@@ -21,6 +21,7 @@ from backend.evaluation.full_vector_benchmark import (
     full_vector_knowledge_base,
 )
 from backend.evaluation.retrieval_benchmark import benchmark_knowledge_base
+from backend.evaluation.retrieval_observability import analyze_observability, write_trace_artifacts
 from backend.retrieval import RetrievalCandidate, RetrievalResult, analyze_query
 from backend.retrieval.evidence_support import skipped_support, validate_evidence_support
 from backend.retrieval.section import normalize_section
@@ -445,7 +446,15 @@ def _section_mode(enabled: bool):
             os.environ["SECTION_EXPANSION_ENABLED"] = previous
 
 
-def _run_mode(mode: str, queries: list[dict], light_rag, light_id, reranker) -> dict:
+def _run_mode(
+    mode: str,
+    queries: list[dict],
+    light_rag,
+    light_id,
+    reranker,
+    *,
+    trace_enabled: bool = False,
+) -> dict:
     rows, latencies, rerank_rows = [], [], []
     section_enabled = mode == "hybrid_section_rerank"
     with _section_mode(section_enabled):
@@ -456,7 +465,13 @@ def _run_mode(mode: str, queries: list[dict], light_rag, light_id, reranker) -> 
                 candidates = light_rag.filter_relevant_docs(result)
             else:
                 retrieval_mode = "hybrid" if mode in {"hybrid_rerank", "hybrid_section_rerank"} else mode
-                result = rag_core.retrieve_docs(query["query"], k=5, knowledge_base_id=FULL_BENCHMARK_KNOWLEDGE_BASE_ID, retrieval_mode=retrieval_mode)
+                result = rag_core.retrieve_docs(
+                    query["query"], k=5,
+                    knowledge_base_id=FULL_BENCHMARK_KNOWLEDGE_BASE_ID,
+                    retrieval_mode=retrieval_mode,
+                    trace_enabled=trace_enabled,
+                    trace_query_id=query["query_id"],
+                )
                 candidates = rag_core.filter_relevant_docs(result)
             before = _candidate_rows(candidates.candidates)
             if mode in {"hybrid_rerank", "hybrid_section_rerank"}:
@@ -464,6 +479,9 @@ def _run_mode(mode: str, queries: list[dict], light_rag, light_id, reranker) -> 
                 selected = outcome.result.candidates
             else:
                 outcome, selected = None, candidates.candidates
+            trace = getattr((outcome.result if outcome else candidates), "trace", None)
+            if trace:
+                trace.finalize(selected)
             candidate_rows = _candidate_rows(selected)
             latencies.append((time.perf_counter() - started) * 1000)
             before_rank = rank_of(before, query["relevant_chunk_ids"])
@@ -486,6 +504,7 @@ def _run_mode(mode: str, queries: list[dict], light_rag, light_id, reranker) -> 
                     candidates.section_report.as_dict()
                     if getattr(candidates, "section_report", None) else None
                 ),
+                "trace": trace.as_dict() if trace else None,
             })
     report = _summary_metrics(queries, rows)
     report["latency_ms_median"] = statistics.median(latencies)
@@ -493,6 +512,74 @@ def _run_mode(mode: str, queries: list[dict], light_rag, light_id, reranker) -> 
     if rerank_rows:
         report["rerank_analysis"] = _rerank_analysis(rerank_rows)
     return report
+
+
+def _assert_trace_equivalence(plain: dict, traced: dict) -> None:
+    plain_rows = {item["query_id"]: item.get("candidate_ids", []) for item in plain.get("rows", [])}
+    traced_rows = {item["query_id"]: item.get("candidate_ids", []) for item in traced.get("rows", [])}
+    if plain_rows != traced_rows:
+        changed = sorted(key for key in plain_rows if plain_rows.get(key) != traced_rows.get(key))
+        raise RuntimeError(f"Tracing changed retrieval output for queries: {changed}")
+
+
+def _trace_overhead(plain: dict, traced: dict) -> dict:
+    before = float(plain.get("latency_ms_median", 0.0))
+    after = float(traced.get("latency_ms_median", 0.0))
+    return {
+        "off_median_ms": before,
+        "on_median_ms": after,
+        "delta_ms": after - before,
+        "delta_rate": ((after - before) / before if before else 0.0),
+    }
+
+
+def _measure_trace_overhead(queries: list[dict], light_rag, light_id, reranker) -> dict:
+    """Alternate warm OFF/ON requests so cache order does not masquerade as trace cost."""
+    del light_rag, light_id
+    sample = queries[:3]
+    if not sample:
+        return {"status": "NOT_RUN"}
+
+    def run(query: dict, enabled: bool) -> float:
+        with _section_mode(True):
+            started = time.perf_counter()
+            result = rag_core.retrieve_docs(
+                query["query"], k=5,
+                knowledge_base_id=FULL_BENCHMARK_KNOWLEDGE_BASE_ID,
+                retrieval_mode="hybrid",
+                trace_enabled=enabled,
+                trace_query_id=query["query_id"],
+            )
+            candidates = rag_core.filter_relevant_docs(result)
+            outcome = reranker.rerank(query["query"], candidates, top_k=3)
+            trace = getattr(outcome.result, "trace", None)
+            if trace:
+                trace.finalize(outcome.result.candidates)
+            return (time.perf_counter() - started) * 1000
+
+    run(sample[0], False)
+    run(sample[0], True)
+    timings = {False: [], True: []}
+    for index, query in enumerate(sample):
+        order = (False, True) if index % 2 == 0 else (True, False)
+        for enabled in order:
+            timings[enabled].append(run(query, enabled))
+    before = statistics.median(timings[False])
+    after = statistics.median(timings[True])
+    return {
+        "sample_count": len(sample),
+        "off_median_ms": before,
+        "on_median_ms": after,
+        "delta_ms": after - before,
+        "delta_rate": ((after - before) / before if before else 0.0),
+    }
+
+
+def _observability_summary(report: dict) -> dict:
+    return {
+        key: value for key, value in report.items()
+        if key not in {"baseline_candidate_traces", "section_candidate_traces"}
+    }
 
 
 def _rerank_analysis(rows: list[dict]) -> dict:
@@ -1053,10 +1140,55 @@ def run_private_benchmark(manifest_path: Path) -> dict:
             }
             if section_development else None
         )
+        trace_frozen_reports = {
+            mode: _run_mode(
+                mode, manifest["queries"], light_rag, light_id, reranker,
+                trace_enabled=True,
+            )
+            for mode in ("hybrid_rerank", "hybrid_section_rerank")
+        }
+        trace_section_development_reports = (
+            {
+                mode: _run_mode(
+                    mode, section_development["queries"], light_rag, light_id, reranker,
+                    trace_enabled=True,
+                )
+                for mode in ("hybrid_rerank", "hybrid_section_rerank")
+            }
+            if section_development else None
+        )
+        for mode, traced in trace_frozen_reports.items():
+            _assert_trace_equivalence(reports[mode], traced)
+        if trace_section_development_reports:
+            for mode, traced in trace_section_development_reports.items():
+                _assert_trace_equivalence(section_development_reports[mode], traced)
+        measured_trace_overhead = _measure_trace_overhead(
+            manifest["queries"], light_rag, light_id, reranker,
+        )
         support_candidate_rows, support_base_rows = (
             _support_candidate_rows(support_calibration["queries"], ingested, reranker)
             if support_calibration else (None, None)
         )
+    frozen_observability = analyze_observability(
+        manifest["queries"],
+        trace_frozen_reports["hybrid_rerank"],
+        trace_frozen_reports["hybrid_section_rerank"],
+    )
+    development_observability = (
+        analyze_observability(
+            section_development["queries"],
+            trace_section_development_reports["hybrid_rerank"],
+            trace_section_development_reports["hybrid_section_rerank"],
+        )
+        if section_development and trace_section_development_reports else None
+    )
+    trace_artifacts = write_trace_artifacts(
+        manifest_path.parent / "annotations" / "v36_runtime",
+        {
+            "frozen": frozen_observability,
+            **({"development": development_observability} if development_observability else {}),
+        },
+    )
     frozen_support = _frozen_support_report(
         manifest["queries"], reports["hybrid_rerank"], evidence, ingested,
     )
@@ -1128,6 +1260,28 @@ def run_private_benchmark(manifest_path: Path) -> dict:
         "section_metrics": _section_metrics(
             manifest["queries"], reports["hybrid_rerank"], reports["hybrid_section_rerank"],
         ),
+        "v36_observability": {
+            "frozen": _observability_summary(frozen_observability),
+            "development": (
+                _observability_summary(development_observability)
+                if development_observability else {"status": "NOT_RUN"}
+            ),
+            "trace_overhead": {
+                "measured": measured_trace_overhead,
+                "full_run_order_effect": _trace_overhead(
+                    reports["hybrid_section_rerank"], trace_frozen_reports["hybrid_section_rerank"],
+                ),
+                "development": (
+                    _trace_overhead(
+                        section_development_reports["hybrid_section_rerank"],
+                        trace_section_development_reports["hybrid_section_rerank"],
+                    )
+                    if section_development_reports and trace_section_development_reports
+                    else {"status": "NOT_RUN"}
+                ),
+            },
+            "artifacts": trace_artifacts,
+        },
         "calibration": ({
             "name": calibration.get("name", "v3.2-private-calibration"),
             "documents": len(manifest["documents"]),
