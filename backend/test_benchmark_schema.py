@@ -12,7 +12,10 @@ from backend.evaluation.private_benchmark import (
     _candidate_rows,
     _resolve_local_file,
     _rerank_analysis,
+    _query_for_schema,
     _support_gate_evidence_summary,
+    _summary_metrics,
+    _support_recovery,
     annotation_hash,
     calibration_hash,
     development_hash,
@@ -22,6 +25,83 @@ from backend.evaluation.private_benchmark import (
     load_private_manifest,
     support_calibration_hash,
 )
+
+
+def test_private_schema_adapter_defaults_optional_identifier_label():
+    adapted = _query_for_schema({"query_id": "dev", "query": "startup", "category": "procedure", "expected_model": "Drive 100"})
+    assert adapted["expected_error_code"] == ""
+    assert adapted["expected_equipment_model"] == "Drive 100"
+
+
+def test_private_summary_accepts_section_dev_without_identifier_label():
+    query = {
+        "query_id": "dev", "query": "Drive 100 startup", "category": "procedure",
+        "answerable": True, "relevant_chunk_ids": ["chunk-a"], "expected_model": "Drive 100",
+    }
+    row = {
+        "query_id": "dev", "query": query["query"], "rank": 1, "refused": False,
+        "candidate_ids": ["chunk-a"],
+        "candidates": [{"chunk_id": "chunk-a", "equipment_model": "Drive 100", "scope_match": "primary"}],
+        "retrieval_scope": {"requested_scope": "EXACT_MODEL_SCOPE"},
+    }
+    ood_query = {
+        "query_id": "ood", "query": "Drive 100 MQTT port", "category": "ood",
+        "answerable": False, "relevant_chunk_ids": [], "expected_model": "Drive 100",
+    }
+    ood_row = {
+        "query_id": "ood", "query": ood_query["query"], "rank": None, "refused": True,
+        "candidate_ids": [], "candidates": [], "retrieval_scope": {"requested_scope": "EXACT_MODEL_SCOPE"},
+    }
+    metrics = _summary_metrics([query, ood_query], [row, ood_row])
+    assert metrics["overall"]["hit_rate_at_1"] == 1.0
+    assert metrics["model_aware_metrics"]["identifier_query_count"] == 0
+
+
+def test_support_recovery_separates_existing_and_introduced_false_support():
+    queries = [
+        {"query_id": "recover", "supported": True},
+        {"query_id": "lost", "supported": True},
+        {"query_id": "existing-false", "supported": False},
+        {"query_id": "introduced-false", "supported": False},
+    ]
+    baseline = {"rows": [
+        {"query_id": "recover", "status": "INSUFFICIENT"},
+        {"query_id": "lost", "status": "SUPPORTED"},
+        {"query_id": "existing-false", "status": "SUPPORTED"},
+        {"query_id": "introduced-false", "status": "INSUFFICIENT"},
+    ]}
+    section = {"rows": [
+        {"query_id": "recover", "status": "SUPPORTED"},
+        {"query_id": "lost", "status": "INSUFFICIENT"},
+        {"query_id": "existing-false", "status": "SUPPORTED"},
+        {"query_id": "introduced-false", "status": "SUPPORTED"},
+    ]}
+    report = _support_recovery(queries, baseline, section)
+    assert report["recovered_count"] == 1
+    assert report["support_loss_count"] == 1
+    assert report["false_support_count"] == 2
+    assert report["introduced_false_support_count"] == 1
+
+
+def test_support_recovery_uses_answerable_when_supported_label_is_absent():
+    queries = [
+        {"query_id": "q1", "answerable": True},
+        {"query_id": "q2", "answerable": False},
+    ]
+    baseline = {"rows": [
+        {"query_id": "q1", "status": "INSUFFICIENT"},
+        {"query_id": "q2", "status": "INSUFFICIENT"},
+    ]}
+    section = {"rows": [
+        {"query_id": "q1", "support": {"status": "SUPPORTED"}},
+        {"query_id": "q2", "status": "INSUFFICIENT"},
+    ]}
+
+    report = _support_recovery(queries, baseline, section)
+
+    assert report["recoverable_count"] == 1
+    assert report["recovered_count"] == 1
+    assert report["support_recovery_rate"] == 1.0
 
 
 def test_challenge_manifest_has_required_coverage():
@@ -167,6 +247,8 @@ def test_private_candidate_rows_include_citation_metadata():
         "vector_distance": 0.1, "lexical_score": 0.2, "pre_rerank_rank": 1, "rerank_rank": 1,
         "lexical_rank": None, "vector_rank": None, "fusion_rank": 1,
         "identity_relation": "UNKNOWN", "scope_match": "none", "scope_level": "GLOBAL_SCOPE",
+        "section_expanded": False, "section_rank": None, "neighbor_distance": None,
+        "pre_section_rank": None, "section_candidate_source": "",
     }
 
 

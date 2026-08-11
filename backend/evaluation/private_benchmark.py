@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import statistics
 import time
 from collections import Counter, defaultdict
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import asdict
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from backend.evaluation.full_vector_benchmark import (
 from backend.evaluation.retrieval_benchmark import benchmark_knowledge_base
 from backend.retrieval import RetrievalCandidate, RetrievalResult, analyze_query
 from backend.retrieval.evidence_support import skipped_support, validate_evidence_support
+from backend.retrieval.section import normalize_section
 from backend.retrieval.reranker import CrossEncoderReranker, RerankerConfig
 from backend.retrieval.evidence import analyze_retrieval_evidence
 from backend.retrieval.product_identity import identity_from_metadata
@@ -41,7 +43,8 @@ PRIVATE_CATEGORIES = {
     "identifier", "fault", "parameter", "semantic", "procedure", "safety",
     "maintenance", "mixed", "comparison", "ood",
 }
-PRIVATE_MODES = ("bm25", "vector", "hybrid", "hybrid_rerank")
+CORE_PRIVATE_MODES = ("bm25", "vector", "hybrid", "hybrid_rerank")
+PRIVATE_MODES = (*CORE_PRIVATE_MODES, "hybrid_section_rerank")
 FALSE_REFUSAL_REASONS = {
     "WEAK_RETRIEVAL_EVIDENCE": "DISTANCE_THRESHOLD",
     "MODEL_MISMATCH": "METADATA_MISMATCH",
@@ -70,6 +73,11 @@ def development_hash(development: dict) -> str:
 
 def support_calibration_hash(calibration: dict) -> str:
     payload = json.dumps(calibration["queries"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def section_development_hash(development: dict) -> str:
+    payload = json.dumps(development["queries"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -204,6 +212,37 @@ def load_support_calibration(path: Path, manifest: dict, chunk_ids: set[str]) ->
     return calibration
 
 
+def load_section_development(path: Path, manifest: dict, chunk_ids: set[str]) -> dict:
+    development = json.loads(path.read_text(encoding="utf-8"))
+    queries = development.get("queries", [])
+    if not 20 <= len(queries) <= 30:
+        raise ValueError("V3.5 section development requires 20 to 30 independent queries.")
+    required = {
+        "query_id", "query", "category", "answerable", "supported",
+        "relevant_chunk_ids", "expected_model", "expected_section", "hard_positive",
+    }
+    frozen_queries = {item["query"].strip().casefold() for item in manifest["queries"]}
+    query_ids = set()
+    for item in queries:
+        if not required.issubset(item) or item["query_id"] in query_ids:
+            raise ValueError("V3.5 section development schema or ID is invalid.")
+        if item["query"].strip().casefold() in frozen_queries:
+            raise ValueError("V3.5 section development must differ from frozen queries.")
+        if item["answerable"] != bool(item["relevant_chunk_ids"]):
+            raise ValueError("V3.5 answerable flag must match relevant chunks.")
+        if not set(item["relevant_chunk_ids"]).issubset(chunk_ids):
+            raise ValueError("V3.5 section development references an unknown chunk.")
+        if item["supported"] and not item["answerable"]:
+            raise ValueError("Unsupported V3.5 queries cannot be labeled supported.")
+        query_ids.add(item["query_id"])
+    if development.get("corpus_annotation_sha256") != annotation_hash(manifest):
+        raise ValueError("V3.5 section development corpus hash does not match V3.1.")
+    frozen_hash = development.get("freeze", {}).get("section_development_sha256")
+    if frozen_hash and frozen_hash != section_development_hash(development):
+        raise ValueError("V3.5 section development hash does not match its query set.")
+    return development
+
+
 def _resolve_local_file(manifest_path: Path, value: str) -> Path:
     root = manifest_path.parent.resolve()
     source = (root / value).resolve()
@@ -289,6 +328,11 @@ def _candidate_rows(candidates: list) -> list[dict]:
         "identity_relation": getattr(candidate, "identity_relation", "UNKNOWN"),
         "scope_match": getattr(candidate, "scope_match", "none"),
         "scope_level": getattr(candidate, "scope_level", "GLOBAL_SCOPE"),
+        "section_expanded": getattr(candidate, "section_expanded", False),
+        "section_rank": getattr(candidate, "section_rank", None),
+        "neighbor_distance": getattr(candidate, "neighbor_distance", None),
+        "pre_section_rank": getattr(candidate, "pre_section_rank", None),
+        "section_candidate_source": getattr(candidate, "section_candidate_source", ""),
     } for rank, candidate in enumerate(candidates, start=1)]
 
 
@@ -297,6 +341,7 @@ def _query_for_schema(query: dict) -> dict:
         **query,
         "query_type": query["category"],
         "expected_equipment_model": query["expected_model"],
+        "expected_error_code": query.get("expected_error_code", ""),
     }
 
 
@@ -313,7 +358,7 @@ def _summary_metrics(queries: list[dict], rows: list[dict]) -> dict:
     identifier = defaultdict(list)
     for item in queries:
         if item["answerable"] and item["category"] == "identifier":
-            identifier["fault_code" if item["expected_error_code"].upper().startswith(("F", "A")) else "parameter_or_register"].append(item)
+            identifier["fault_code" if item.get("expected_error_code", "").upper().startswith(("F", "A")) else "parameter_or_register"].append(item)
 
     def top1_rate(items: list[dict]) -> float | None:
         return (sum(by_id[item["query_id"]]["rank"] == 1 for item in items) / len(items)) if items else None
@@ -323,7 +368,7 @@ def _summary_metrics(queries: list[dict], rows: list[dict]) -> dict:
         if item["answerable"]
         and by_id[item["query_id"]].get("retrieval_scope", {}).get("requested_scope") == "EXACT_MODEL_SCOPE"
     ]
-    identifier_queries = [item for item in queries if item["answerable"] and item["expected_error_code"]]
+    identifier_queries = [item for item in queries if item["answerable"] and item.get("expected_error_code")]
     scoped_rows = [
         by_id[item["query_id"]] for item in queries
         if by_id[item["query_id"]].get("retrieval_scope", {}).get("requested_scope")
@@ -387,42 +432,61 @@ def _summary_metrics(queries: list[dict], rows: list[dict]) -> dict:
     }
 
 
+@contextmanager
+def _section_mode(enabled: bool):
+    previous = os.environ.get("SECTION_EXPANSION_ENABLED")
+    os.environ["SECTION_EXPANSION_ENABLED"] = "true" if enabled else "false"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("SECTION_EXPANSION_ENABLED", None)
+        else:
+            os.environ["SECTION_EXPANSION_ENABLED"] = previous
+
+
 def _run_mode(mode: str, queries: list[dict], light_rag, light_id, reranker) -> dict:
     rows, latencies, rerank_rows = [], [], []
-    for query in queries:
-        started = time.perf_counter()
-        if mode == "bm25":
-            result = light_rag.retrieve_docs(query["query"], k=5, knowledge_base_id=light_id, retrieval_mode="lexical")
-            candidates = light_rag.filter_relevant_docs(result)
-        else:
-            retrieval_mode = "hybrid" if mode == "hybrid_rerank" else mode
-            result = rag_core.retrieve_docs(query["query"], k=5, knowledge_base_id=FULL_BENCHMARK_KNOWLEDGE_BASE_ID, retrieval_mode=retrieval_mode)
-            candidates = rag_core.filter_relevant_docs(result)
-        before = _candidate_rows(candidates.candidates)
-        if mode == "hybrid_rerank":
-            outcome = reranker.rerank(query["query"], candidates, top_k=3)
-            selected = outcome.result.candidates
-        else:
-            outcome, selected = None, candidates.candidates
-        candidate_rows = _candidate_rows(selected)
-        latencies.append((time.perf_counter() - started) * 1000)
-        before_rank = rank_of(before, query["relevant_chunk_ids"])
-        rank = rank_of(candidate_rows, query["relevant_chunk_ids"])
-        if outcome:
-            rerank_rows.append({
-                "query_id": query["query_id"], "before_rank": before_rank, "after_rank": rank,
-                "answerable": query["answerable"],
-                "candidate_missing": before_rank is None,
+    section_enabled = mode == "hybrid_section_rerank"
+    with _section_mode(section_enabled):
+        for query in queries:
+            started = time.perf_counter()
+            if mode == "bm25":
+                result = light_rag.retrieve_docs(query["query"], k=5, knowledge_base_id=light_id, retrieval_mode="lexical")
+                candidates = light_rag.filter_relevant_docs(result)
+            else:
+                retrieval_mode = "hybrid" if mode in {"hybrid_rerank", "hybrid_section_rerank"} else mode
+                result = rag_core.retrieve_docs(query["query"], k=5, knowledge_base_id=FULL_BENCHMARK_KNOWLEDGE_BASE_ID, retrieval_mode=retrieval_mode)
+                candidates = rag_core.filter_relevant_docs(result)
+            before = _candidate_rows(candidates.candidates)
+            if mode in {"hybrid_rerank", "hybrid_section_rerank"}:
+                outcome = reranker.rerank(query["query"], candidates, top_k=3)
+                selected = outcome.result.candidates
+            else:
+                outcome, selected = None, candidates.candidates
+            candidate_rows = _candidate_rows(selected)
+            latencies.append((time.perf_counter() - started) * 1000)
+            before_rank = rank_of(before, query["relevant_chunk_ids"])
+            rank = rank_of(candidate_rows, query["relevant_chunk_ids"])
+            if outcome:
+                rerank_rows.append({
+                    "query_id": query["query_id"], "before_rank": before_rank, "after_rank": rank,
+                    "answerable": query["answerable"],
+                    "candidate_missing": before_rank is None,
+                })
+            rows.append({
+                "query_id": query["query_id"], "query": query["query"],
+                "rank": rank, "refused": not candidate_rows, "candidates": candidate_rows,
+                "candidate_ids": [item["chunk_id"] for item in candidate_rows],
+                "retrieval_scope": (
+                    candidates.scope_decision.as_dict()
+                    if getattr(candidates, "scope_decision", None) else {}
+                ),
+                "section_retrieval": (
+                    candidates.section_report.as_dict()
+                    if getattr(candidates, "section_report", None) else None
+                ),
             })
-        rows.append({
-            "query_id": query["query_id"], "query": query["query"],
-            "rank": rank, "refused": not candidate_rows, "candidates": candidate_rows,
-            "candidate_ids": [item["chunk_id"] for item in candidate_rows],
-            "retrieval_scope": (
-                candidates.scope_decision.as_dict()
-                if getattr(candidates, "scope_decision", None) else {}
-            ),
-        })
     report = _summary_metrics(queries, rows)
     report["latency_ms_median"] = statistics.median(latencies)
     report["latency_ms_p95"] = sorted(latencies)[max(0, round(len(latencies) * .95) - 1)]
@@ -446,6 +510,142 @@ def _rerank_analysis(rows: list[dict]) -> dict:
         "loss_rate": degraded / len(comparable) if comparable else 0.0,
         "mean_rank_delta": statistics.mean(deltas) if deltas else 0.0,
         "rows": rows,
+    }
+
+
+def _section_metrics(queries: list[dict], baseline: dict, section: dict) -> dict:
+    before = {row["query_id"]: row for row in baseline["rows"]}
+    after = {row["query_id"]: row for row in section["rows"]}
+    labeled = [item for item in queries if item.get("answerable") and item.get("expected_section")]
+
+    def section_rank(item: dict, row: dict) -> int | None:
+        expected = normalize_section(item.get("expected_section", ""))
+        for rank, candidate in enumerate(row.get("candidates", [])[:5], start=1):
+            if normalize_section(candidate.get("section", "")) == expected:
+                return rank
+        return None
+
+    before_section = {item["query_id"]: section_rank(item, before[item["query_id"]]) for item in labeled}
+    after_section = {item["query_id"]: section_rank(item, after[item["query_id"]]) for item in labeled}
+    answerable = [item for item in queries if item.get("answerable")]
+    wins = losses = 0
+    for item in answerable:
+        old = before[item["query_id"]].get("rank")
+        new = after[item["query_id"]].get("rank")
+        if new is not None and (old is None or new < old):
+            wins += 1
+        elif old is not None and (new is None or new > old):
+            losses += 1
+    return {
+        "correct_section_hit_at_1": (
+            sum(rank == 1 for rank in after_section.values()) / len(labeled) if labeled else None
+        ),
+        "correct_section_recall_at_5": (
+            sum(rank is not None and rank <= 5 for rank in after_section.values()) / len(labeled) if labeled else None
+        ),
+        "relevant_chunk_recall_at_5": (
+            sum((after[item["query_id"]].get("rank") or 99) <= 5 for item in answerable) / len(answerable)
+            if answerable else None
+        ),
+        "section_expansion_win_rate": wins / len(answerable) if answerable else 0.0,
+        "section_expansion_loss_rate": losses / len(answerable) if answerable else 0.0,
+        "wins": wins,
+        "losses": losses,
+        "rows": [
+            {
+                "query_id": item["query_id"],
+                "before_section_rank": before_section[item["query_id"]],
+                "after_section_rank": after_section[item["query_id"]],
+                "before_chunk_rank": before[item["query_id"]].get("rank"),
+                "after_chunk_rank": after[item["query_id"]].get("rank"),
+            }
+            for item in labeled
+        ],
+    }
+
+
+def _report_support(queries: list[dict], report: dict, documents: list[Document]) -> dict:
+    documents_by_chunk = {str(item.metadata.get("chunk_id", "")): item for item in documents}
+    report_rows = {item["query_id"]: item for item in report["rows"]}
+    rows = []
+    for query in queries:
+        candidate_rows = report_rows[query["query_id"]].get("candidates", [])
+        candidates = [
+            RetrievalCandidate(
+                document=documents_by_chunk[item["chunk_id"]],
+                retrieval_source=item.get("section_candidate_source") or "hybrid",
+                final_rank=item.get("rank"),
+                identity_relation=item.get("identity_relation", "UNKNOWN"),
+                scope_match=item.get("scope_match", "none"),
+                scope_level=item.get("scope_level", "GLOBAL_SCOPE"),
+            )
+            for item in candidate_rows
+            if item.get("chunk_id") in documents_by_chunk
+        ]
+        result = RetrievalResult(
+            candidates,
+            query_analysis=analyze_query(query["query"], documents),
+            corpus_documents=documents,
+            retrieval_mode="hybrid",
+        )
+        support = validate_evidence_support(query["query"], result, documents)
+        rows.append({
+            "query_id": query["query_id"],
+            "expected_supported": bool(query.get("supported", query.get("answerable"))),
+            "status": support.status,
+            "missing_requirements": list(support.missing_requirements),
+            "supporting_chunks": list(support.supporting_chunks),
+        })
+    return {"rows": rows}
+
+
+def _support_recovery(queries: list[dict], baseline: dict, section: dict) -> dict:
+    before = {item["query_id"]: item for item in baseline["rows"]}
+    after = {item["query_id"]: item for item in section["rows"]}
+    def expected_supported(item: dict) -> bool:
+        return bool(item.get("supported", item.get("answerable")))
+
+    def support_status(item: dict) -> str:
+        return str(item.get("status") or item.get("support", {}).get("status", "UNKNOWN"))
+
+    recoverable = [
+        item for item in queries
+        if expected_supported(item) and support_status(before[item["query_id"]]) != "SUPPORTED"
+    ]
+    recovered = [
+        item for item in recoverable
+        if support_status(after[item["query_id"]]) == "SUPPORTED"
+    ]
+    lost = [
+        item for item in queries
+        if expected_supported(item)
+        and support_status(before[item["query_id"]]) == "SUPPORTED"
+        and support_status(after[item["query_id"]]) != "SUPPORTED"
+    ]
+    negatives = [item for item in queries if not expected_supported(item)]
+    baseline_false_support = [
+        item for item in negatives if support_status(before[item["query_id"]]) == "SUPPORTED"
+    ]
+    false_support = [
+        item for item in negatives if support_status(after[item["query_id"]]) == "SUPPORTED"
+    ]
+    introduced_false_support = [
+        item for item in false_support
+        if support_status(before[item["query_id"]]) != "SUPPORTED"
+    ]
+    return {
+        "recoverable_count": len(recoverable),
+        "recovered_count": len(recovered),
+        "support_recovery_rate": len(recovered) / len(recoverable) if recoverable else 0.0,
+        "recovered_query_ids": [item["query_id"] for item in recovered],
+        "support_loss_count": len(lost),
+        "support_loss_query_ids": [item["query_id"] for item in lost],
+        "baseline_false_support_count": len(baseline_false_support),
+        "false_support_count": len(false_support),
+        "false_support_rate": len(false_support) / len(negatives) if negatives else 0.0,
+        "false_support_query_ids": [item["query_id"] for item in false_support],
+        "introduced_false_support_count": len(introduced_false_support),
+        "introduced_false_support_query_ids": [item["query_id"] for item in introduced_false_support],
     }
 
 
@@ -825,6 +1025,12 @@ def run_private_benchmark(manifest_path: Path) -> dict:
         if support_calibration_path.exists()
         else None
     )
+    section_development_path = manifest_path.parent / "annotations" / "v35_section_development.json"
+    section_development = (
+        load_section_development(section_development_path, manifest, ingested_chunk_ids)
+        if section_development_path.exists()
+        else None
+    )
     benchmark = {"documents": [{"content": item.page_content, "metadata": dict(item.metadata)} for item in ingested]}
     reranker = CrossEncoderReranker(RerankerConfig(enabled=True, candidate_k=5, top_k=3, device="cpu"))
     with ExitStack() as stack:
@@ -840,12 +1046,22 @@ def run_private_benchmark(manifest_path: Path) -> dict:
             }
             if development else None
         )
+        section_development_reports = (
+            {
+                mode: _run_mode(mode, section_development["queries"], light_rag, light_id, reranker)
+                for mode in ("hybrid_rerank", "hybrid_section_rerank")
+            }
+            if section_development else None
+        )
         support_candidate_rows, support_base_rows = (
             _support_candidate_rows(support_calibration["queries"], ingested, reranker)
             if support_calibration else (None, None)
         )
     frozen_support = _frozen_support_report(
         manifest["queries"], reports["hybrid_rerank"], evidence, ingested,
+    )
+    section_frozen_support = _frozen_support_report(
+        manifest["queries"], reports["hybrid_section_rerank"], evidence, ingested,
     )
     support_calibration_report = (
         _support_report(
@@ -860,7 +1076,7 @@ def run_private_benchmark(manifest_path: Path) -> dict:
     over_filter = (
         {
             mode: _over_filter_report(baseline["reports"][mode], reports[mode])
-            for mode in PRIVATE_MODES
+            for mode in CORE_PRIVATE_MODES
         }
         if baseline else {"status": "NOT_RUN"}
     )
@@ -892,7 +1108,7 @@ def run_private_benchmark(manifest_path: Path) -> dict:
                     "latency_ms_median": baseline["reports"][mode]["latency_ms_median"],
                     "comparison_coverage_at_5": baseline["reports"][mode].get("comparison_coverage_at_5"),
                 }
-                for mode in PRIVATE_MODES
+                for mode in CORE_PRIVATE_MODES
             },
             "evidence": {
                 key: baseline["evidence"][key]
@@ -905,6 +1121,13 @@ def run_private_benchmark(manifest_path: Path) -> dict:
         "evidence": evidence,
         "v34_evidence": v34_evidence,
         "support_frozen": frozen_support,
+        "section_support_frozen": section_frozen_support,
+        "section_support_recovery": _support_recovery(
+            manifest["queries"], frozen_support, section_frozen_support,
+        ),
+        "section_metrics": _section_metrics(
+            manifest["queries"], reports["hybrid_rerank"], reports["hybrid_section_rerank"],
+        ),
         "calibration": ({
             "name": calibration.get("name", "v3.2-private-calibration"),
             "documents": len(manifest["documents"]),
@@ -929,4 +1152,27 @@ def run_private_benchmark(manifest_path: Path) -> dict:
             "hash": support_calibration_hash(support_calibration),
             **support_calibration_report,
         } if support_calibration else {"status": "NOT_RUN"}),
+        "section_development": ({
+            "name": section_development.get("name", "v3.5-section-development"),
+            "count": len(section_development["queries"]),
+            "categories": dict(Counter(item["category"] for item in section_development["queries"])),
+            "hard_positives": dict(Counter(item["hard_positive"] for item in section_development["queries"])),
+            "hash": section_development_hash(section_development),
+            "reports": section_development_reports,
+            "section_metrics": _section_metrics(
+                section_development["queries"],
+                section_development_reports["hybrid_rerank"],
+                section_development_reports["hybrid_section_rerank"],
+            ),
+            "support": (
+                lambda before, after: {
+                    "baseline": before,
+                    "section": after,
+                    "recovery": _support_recovery(section_development["queries"], before, after),
+                }
+            )(
+                _report_support(section_development["queries"], section_development_reports["hybrid_rerank"], ingested),
+                _report_support(section_development["queries"], section_development_reports["hybrid_section_rerank"], ingested),
+            ),
+        } if section_development else {"status": "NOT_RUN"}),
     }

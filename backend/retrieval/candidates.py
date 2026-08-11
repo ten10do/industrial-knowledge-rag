@@ -21,6 +21,11 @@ class RetrievalCandidate:
     identity_relation: str = "UNKNOWN"
     scope_match: str = "none"
     scope_level: str = "GLOBAL_SCOPE"
+    section_expanded: bool = False
+    section_rank: int | None = None
+    neighbor_distance: int | None = None
+    pre_section_rank: int | None = None
+    section_candidate_source: str = ""
 
     @property
     def metadata(self) -> dict:
@@ -42,10 +47,12 @@ class RetrievalResult(list):
         corpus_documents: list | None = None,
         retrieval_mode: str = "",
         scope_decision=None,
+        section_report=None,
     ):
         self.candidates = candidates
         self.query_analysis = query_analysis
         self.corpus_documents = corpus_documents or []
         self.retrieval_mode = retrieval_mode
         self.scope_decision = scope_decision
+        self.section_report = section_report
         super().__init__((candidate.document, candidate.evidence_score) for candidate in candidates)

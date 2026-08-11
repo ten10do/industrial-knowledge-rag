@@ -366,6 +366,11 @@ class SourceItem(BaseModel):
     pre_rerank_rank: int | None = None
     rerank_score: float | None = None
     rerank_rank: int | None = None
+    section_expanded: bool = False
+    section_rank: int | None = None
+    neighbor_distance: int | None = None
+    pre_section_rank: int | None = None
+    section_candidate_source: str = ""
 
 
 class AskResponse(BaseModel):
@@ -375,6 +380,7 @@ class AskResponse(BaseModel):
     evidence: dict | None = None
     support: dict | None = None
     reranker: dict | None = None
+    section_retrieval: dict | None = None
     conversation_context: ConversationContext | None = None
 
 
@@ -1343,6 +1349,11 @@ def serialize_sources(docs):
                 pre_rerank_rank=(candidate.pre_rerank_rank if candidate else None),
                 rerank_score=(candidate.rerank_score if candidate else None),
                 rerank_rank=(candidate.rerank_rank if candidate else None),
+                section_expanded=(candidate.section_expanded if candidate else False),
+                section_rank=(candidate.section_rank if candidate else None),
+                neighbor_distance=(candidate.neighbor_distance if candidate else None),
+                pre_section_rank=(candidate.pre_section_rank if candidate else None),
+                section_candidate_source=(candidate.section_candidate_source if candidate else ""),
             )
         )
 
@@ -1532,6 +1543,10 @@ def ask(
             raw_docs = retrieve_docs(context_result.standalone_query, **retrieval_arguments)
 
         docs = filter_relevant_docs(raw_docs)
+        section_status = (
+            raw_docs.section_report.as_dict()
+            if getattr(raw_docs, "section_report", None) else None
+        )
         sources = serialize_sources(docs)
         evidence = None
         if hasattr(raw_docs, "candidates"):
@@ -1557,6 +1572,7 @@ def ask(
                     is_refused=True,
                     evidence=evidence.as_dict(),
                     reranker=reranker_status,
+                    section_retrieval=section_status,
                     conversation_context=context_metadata,
                 )
         if not has_relevant_docs(docs):
@@ -1565,6 +1581,7 @@ def ask(
                 sources=sources,
                 is_refused=True,
                 evidence=evidence.as_dict() if evidence else None,
+                section_retrieval=section_status,
                 conversation_context=context_metadata,
             )
 
@@ -1594,6 +1611,7 @@ def ask(
                     evidence=evidence.as_dict() if evidence else None,
                     support=support.as_dict(),
                     reranker=reranker_status,
+                    section_retrieval=section_status,
                     conversation_context=context_metadata,
                 )
 
@@ -1620,6 +1638,7 @@ def ask(
             evidence=evidence.as_dict() if evidence else None,
             support=support.as_dict() if support else None,
             reranker=reranker_status,
+            section_retrieval=section_status,
             conversation_context=context_metadata,
         )
     except ModelGovernanceError as exc:

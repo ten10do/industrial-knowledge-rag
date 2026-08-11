@@ -233,3 +233,29 @@ Run the real benchmark and optional smoke gate:
 .\venv\Scripts\python.exe -m backend.evaluation.reranker_benchmark
 $env:RUN_REAL_RERANKER_SMOKE="1"; .\venv\Scripts\python.exe -m pytest backend\test_reranker_smoke.py
 ```
+
+## V3.5 Section-aware Retrieval
+
+V3.5 adds an experimental retrieval layer for manuals whose relevant procedure
+or specification is split across section siblings. It normalizes section
+identity for retrieval without changing the original citation metadata, derives
+a small rule-based section hint from the query, ranks section candidates from
+the corpus's own titles/subtitles and representative chunk text, and adds only
+same-document, same-section neighbors inside the active product scope.
+
+The feature is automatic and disabled by default:
+
+```text
+SECTION_EXPANSION_ENABLED=false
+SECTION_NEIGHBOR_WINDOW=1
+SECTION_CANDIDATE_K=2
+SECTION_MAX_EXPANDED=3
+```
+
+Expanded candidates retain the original lexical/vector/fusion ranks and expose
+`section_rank`, `neighbor_distance`, `pre_section_rank`, and
+`section_candidate_source` for debugging. Candidate merge is deduplicated by
+`chunk_id`, never expands beyond the primary ProductIdentity scope, and respects
+the existing reranker candidate budget. Missing or unusable section metadata
+falls back to the original retrieval path and reports the reason. The reranker
+and Support Gate remain independently configuration-gated and production-off.

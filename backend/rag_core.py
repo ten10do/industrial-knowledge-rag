@@ -15,14 +15,14 @@ if __package__:
     from .ingestion import PageText, ingest_pages
     from .learning_content import generate_hierarchical_learning_content
     from .llm_client import generate_llm_answer
-    from .retrieval import RetrievalCandidate, RetrievalResult, analyze_query, analyze_retrieval_evidence, build_retrieval_scope, collect_scoped_candidates, rrf_fuse
+    from .retrieval import RetrievalCandidate, RetrievalResult, SectionExpansionReport, analyze_query, analyze_retrieval_evidence, build_retrieval_scope, collect_scoped_candidates, expand_section_candidates, load_section_config, rrf_fuse
     from .retrieval.bm25 import BM25Index
     from .retrieval.filters import has_exact_metadata_match
 else:
     from ingestion import PageText, ingest_pages
     from learning_content import generate_hierarchical_learning_content
     from llm_client import generate_llm_answer
-    from retrieval import RetrievalCandidate, RetrievalResult, analyze_query, analyze_retrieval_evidence, build_retrieval_scope, collect_scoped_candidates, rrf_fuse
+    from retrieval import RetrievalCandidate, RetrievalResult, SectionExpansionReport, analyze_query, analyze_retrieval_evidence, build_retrieval_scope, collect_scoped_candidates, expand_section_candidates, load_section_config, rrf_fuse
     from retrieval.bm25 import BM25Index
     from retrieval.filters import has_exact_metadata_match
 
@@ -566,11 +566,27 @@ def retrieve_docs(
                 top_k=min(k, _positive_int("HYBRID_TOP_K", DEFAULT_HYBRID_TOP_K)),
             )
         )
+    section_report = None
+    if mode == "hybrid":
+        section_config, section_error = load_section_config()
+        if section_error:
+            section_report = SectionExpansionReport(True, False, section_error)
+        else:
+            candidates, section_report = expand_section_candidates(
+                question,
+                candidates,
+                all_documents,
+                scope,
+                budget=k,
+                cache_key=knowledge_base_id,
+                config=section_config,
+            )
     for rank, candidate in enumerate(candidates, start=1):
         candidate.final_rank = rank
     return RetrievalResult(
         candidates, query_analysis=analysis,
         corpus_documents=all_documents, retrieval_mode=mode, scope_decision=scope,
+        section_report=section_report,
     )
 
 
@@ -608,7 +624,8 @@ def filter_relevant_docs(scored_docs):
     if candidates is not None:
         return RetrievalResult([
             candidate for candidate in candidates
-            if candidate.exact_metadata_match
+            if candidate.section_expanded
+            or candidate.exact_metadata_match
             or (
                 candidate.lexical_score is not None
                 and candidate.lexical_score > 0
@@ -620,7 +637,8 @@ def filter_relevant_docs(scored_docs):
         ], query_analysis=getattr(scored_docs, "query_analysis", None),
             corpus_documents=getattr(scored_docs, "corpus_documents", []),
             retrieval_mode=getattr(scored_docs, "retrieval_mode", ""),
-            scope_decision=getattr(scored_docs, "scope_decision", None))
+            scope_decision=getattr(scored_docs, "scope_decision", None),
+            section_report=getattr(scored_docs, "section_report", None))
     threshold = get_relevance_threshold()
     return [
         (document, score)

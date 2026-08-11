@@ -17,6 +17,17 @@ from .evidence_support import (
 )
 from .reranker import CrossEncoderReranker, RerankerConfig, RerankOutcome, get_reranker
 from .scope import RetrievalScope, RetrievalScopeDecision, build_retrieval_scope, collect_scoped_candidates
+from .section import (
+    SectionConfig,
+    SectionExpansionReport,
+    SectionHint,
+    SectionIdentity,
+    expand_section_candidates,
+    infer_section_hint,
+    load_section_config,
+    normalize_section,
+    section_identity,
+)
 
 __all__ = [
     "BM25Index",
@@ -48,4 +59,13 @@ __all__ = [
     "RetrievalScopeDecision",
     "build_retrieval_scope",
     "collect_scoped_candidates",
+    "SectionConfig",
+    "SectionExpansionReport",
+    "SectionHint",
+    "SectionIdentity",
+    "expand_section_candidates",
+    "infer_section_hint",
+    "load_section_config",
+    "normalize_section",
+    "section_identity",
 ]
