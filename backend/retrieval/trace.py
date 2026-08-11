@@ -58,6 +58,12 @@ class CandidateTrace:
     pre_rerank_rank: int | None = None
     rerank_score: float | None = None
     rerank_rank: int | None = None
+    final_selection_source: str = ""
+    final_selection_reason: str = ""
+    protected_candidate: bool = False
+    rescue_candidate: bool = False
+    candidate_replaced: bool = False
+    replacement_reason: str = ""
     final_selected: bool = False
     final_rank: int | None = None
     drop_reason: str = ""
@@ -133,6 +139,8 @@ class RetrievalTrace:
             "lexical_score", "vector_rank", "fusion_score", "section_rank",
             "section_expanded", "neighbor_distance", "pre_rerank_rank",
             "rerank_score", "rerank_rank",
+            "final_selection_source", "final_selection_reason", "protected_candidate",
+            "rescue_candidate", "candidate_replaced", "replacement_reason",
             "candidate_source", "preservation_class",
         ):
             value = getattr(candidate, name, None)

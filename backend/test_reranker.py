@@ -123,3 +123,21 @@ def test_invalid_environment_configuration_is_safe_and_observable():
         config, error = load_reranker_config()
     assert config.enabled is False
     assert "Invalid reranker configuration" in error
+
+
+def test_retrieval_rescue_keeps_high_value_original_without_score_fusion():
+    candidates = [
+        _candidate("first", "relevant relevant relevant", 1),
+        _candidate("second", "relevant relevant", 2),
+        _candidate("third", "relevant", 3),
+        _candidate("rescued", "unrelated", 4, equipment_model="Drive 100"),
+    ]
+    rescued = candidates[-1]
+    rescued.candidate_source = "ORIGINAL_RETRIEVAL"
+    rescued.identity_relation = "EXACT_MODEL"
+    output = _reranker().rerank(
+        "query", RetrievalResult(candidates), top_k=3, final_strategy="retrieval_rescue",
+    )
+    assert [item.chunk_id for item in output.result.candidates] == ["first", "second", "rescued"]
+    assert rescued.rescue_candidate is True
+    assert candidates[2].candidate_replaced is True

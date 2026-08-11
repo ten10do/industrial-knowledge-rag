@@ -456,6 +456,7 @@ def _run_mode(
     trace_enabled: bool = False,
     section_strategy: str = "current",
     candidate_k: int = 5,
+    final_strategy: str = "top3",
 ) -> dict:
     rows, latencies, rerank_rows, reranker_candidate_counts = [], [], [], []
     section_enabled = mode == "hybrid_section_rerank"
@@ -478,7 +479,7 @@ def _run_mode(
                 candidates = rag_core.filter_relevant_docs(result)
             before = _candidate_rows(candidates.candidates)
             if mode in {"hybrid_rerank", "hybrid_section_rerank"}:
-                outcome = reranker.rerank(query["query"], candidates, top_k=3)
+                outcome = reranker.rerank(query["query"], candidates, top_k=3, final_strategy=final_strategy)
                 selected = outcome.result.candidates
             else:
                 outcome, selected = None, candidates.candidates

@@ -15,6 +15,10 @@ DEFAULT_RERANK_MODEL = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
 DEFAULT_RERANK_CANDIDATE_K = 5
 DEFAULT_RERANK_TOP_K = 3
 SUPPORTED_DEVICES = {"cpu", "cuda", "mps"}
+FINAL_SELECTION_TOP3 = "top3"
+FINAL_SELECTION_TOP4 = "top4"
+FINAL_SELECTION_PROTECTED = "protected_slot"
+FINAL_SELECTION_RESCUE = "retrieval_rescue"
 
 
 @dataclass(frozen=True)
@@ -125,7 +129,51 @@ class CrossEncoderReranker:
             raise RuntimeError(self.configuration_error)
         return self._load_model()
 
-    def rerank(self, query: str, result: RetrievalResult, top_k: int | None = None) -> RerankOutcome:
+    @staticmethod
+    def _high_value(candidate) -> bool:
+        source = getattr(candidate, "candidate_source", "ORIGINAL_RETRIEVAL")
+        original = source in {"ORIGINAL_RETRIEVAL", "BOTH"}
+        if not original:
+            return False
+        rank = getattr(candidate, "pre_rerank_rank", None) or 10**9
+        multi_source = getattr(candidate, "lexical_rank", None) is not None and getattr(candidate, "vector_rank", None) is not None
+        return bool(
+            getattr(candidate, "exact_metadata_match", False)
+            or (getattr(candidate, "identity_relation", "") == "EXACT_MODEL" and rank <= 4)
+            or (multi_source and rank <= 3)
+        )
+
+    def _select_final(self, ranked: list, strategy: str, output_k: int) -> list:
+        if strategy not in {FINAL_SELECTION_TOP3, FINAL_SELECTION_TOP4, FINAL_SELECTION_PROTECTED, FINAL_SELECTION_RESCUE}:
+            raise ValueError(f"Unknown final selection strategy: {strategy}")
+        target_k = 4 if strategy == FINAL_SELECTION_TOP4 else output_k
+        selected = list(ranked[:target_k])
+        for candidate in selected:
+            candidate.final_selection_source = "RERANK"
+            candidate.final_selection_reason = "RERANK_TOPK"
+        if strategy == FINAL_SELECTION_PROTECTED and output_k >= 2:
+            selected = list(ranked[: max(0, output_k - 1)])
+            protected = next((candidate for candidate in ranked[output_k - 1:] if self._high_value(candidate)), None)
+            if protected and protected not in selected:
+                protected.protected_candidate = True
+                protected.final_selection_source = "PROTECTED_SLOT"
+                protected.final_selection_reason = "PROTECTED_SLOT_SELECTED"
+                selected.append(protected)
+            else:
+                selected = list(ranked[:output_k])
+        if strategy == FINAL_SELECTION_RESCUE:
+            rescue = next((candidate for candidate in ranked[output_k:] if self._high_value(candidate)), None)
+            if rescue and selected:
+                replaced = selected[-1]
+                selected[-1] = rescue
+                rescue.rescue_candidate = True
+                rescue.final_selection_source = "RETRIEVAL_RESCUE"
+                rescue.final_selection_reason = "RETRIEVAL_RESCUE_SELECTED"
+                replaced.candidate_replaced = True
+                replaced.replacement_reason = "FINAL_CONTEXT_REPLACED"
+        return sorted(selected, key=lambda item: item.rerank_rank or 10**9)
+
+    def rerank(self, query: str, result: RetrievalResult, top_k: int | None = None, *, final_strategy: str = FINAL_SELECTION_TOP3) -> RerankOutcome:
         candidates = list(getattr(result, "candidates", []) or [])
         trace = getattr(result, "trace", None)
         output_k = top_k or self.config.top_k
@@ -152,7 +200,7 @@ class CrossEncoderReranker:
                     trace.event(candidate, "RERANK_SELECTED", "RERANK", rank=candidate.rerank_rank)
                 else:
                     trace.drop(
-                        candidate, "RERANK_DROPPED", "RERANK", "RERANK_TRUNCATED",
+                        candidate, "RERANK_DROPPED", "RERANK", getattr(candidate, "replacement_reason", "") or "RERANK_TOPK_TRUNCATED",
                         rank=candidate.rerank_rank,
                     )
             trace.mark_stage("RERANK", selected)
@@ -197,13 +245,13 @@ class CrossEncoderReranker:
             for rank, (candidate, score) in enumerate(scored, start=1):
                 candidate.rerank_score = score
                 candidate.rerank_rank = rank
-                if rank <= output_k:
-                    ranked.append(candidate)
-            reranked = subset(ranked)
-            record_selection(ranked)
+                ranked.append(candidate)
+            selected = self._select_final(ranked, final_strategy, output_k)
+            reranked = subset(selected)
+            record_selection(selected)
             return RerankOutcome(
                 reranked, True, True, model=self.config.model_name,
-                candidate_count=len(candidates), output_count=len(ranked),
+                candidate_count=len(candidates), output_count=len(selected),
             )
         except Exception as exc:
             original = subset(candidates[:output_k])

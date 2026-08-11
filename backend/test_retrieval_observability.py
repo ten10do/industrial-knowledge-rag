@@ -171,7 +171,7 @@ def test_reranker_trace_records_selected_and_truncated_candidates():
     outcome = reranker.rerank("query", result)
     assert [item.chunk_id for item in outcome.result.candidates] == ["c1", "c2"]
     payload = {item["chunk_id"]: item for item in trace.as_dict()["candidates"]}
-    assert payload["c0"]["drop_reason"] == "RERANK_TRUNCATED"
+    assert payload["c0"]["drop_reason"] == "RERANK_TOPK_TRUNCATED"
     assert payload["c1"]["rerank_rank"] == 1
 
 
