@@ -30,4 +30,31 @@ Run:
 .\venv\Scripts\python.exe -m backend.evaluation.benchmark_runner --dataset private --mode all
 ```
 
+## V3.10.1 resumable cross-corpus evaluation
+
+Use the checkpointed runner for the frozen Corpus A/B V3.10 matrix. Runtime
+files remain under the ignored `benchmark_private/v310_runtime/` directory.
+It persists `run_manifest.json`, `progress.json`, individual stage results,
+and query-level rows atomically; `--resume` refuses a changed corpus,
+annotation, or evaluation configuration.
+
+```powershell
+.\venv\Scripts\python.exe -m backend.evaluation.v310_runner --corpus b --restart
+.\venv\Scripts\python.exe -m backend.evaluation.v310_runner --corpus b --resume
+.\venv\Scripts\python.exe -m backend.evaluation.v310_runner --corpus all --resume
+.\venv\Scripts\python.exe -m backend.evaluation.v310_runner --corpus all --latency --restart
+.\venv\Scripts\python.exe -m backend.evaluation.v310_runner --corpus b --failure-trace --resume
+```
+
+Correctness runs execute P2 then P1, Evidence, Support, and failure
+aggregation. Combined correctness is calculated solely from saved A/B query
+rows: it never rebuilds a Combined index or re-executes queries. Latency is a
+separate run over a fixed category-balanced frozen subset; model loading and
+index building are excluded from warm-query latency. The raw retrieval timing
+contains overlapping query-analysis/BM25/Dense/RRF/scope/section work and is
+reported as one measured stage rather than fabricated sub-stage timings.
+Failure tracing is a separate, failure-only P2 run for frozen safety/semantic
+queries; it retains first-failure stage and per-stage relevant ranks without
+turning tracing on for the full correctness benchmark.
+
 The private run always executes the frozen BM25, Dense, Hybrid, and Hybrid + Reranker pipelines. It reports parser audit, chunk/page corpus statistics, category metrics, model confusion, comparison coverage, reranker movement, evidence decisions, false-refusal taxonomy, and latency. Until a local manifest is supplied, the runner reports `REAL_CORPUS_GATE_NOT_RUN`.

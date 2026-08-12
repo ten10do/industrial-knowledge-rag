@@ -492,6 +492,7 @@ def _run_mode(
     section_strategy: str = "current",
     candidate_k: int = 5,
     final_strategy: str = "top3",
+    summarize: bool = True,
 ) -> dict:
     rows, latencies, rerank_rows, reranker_candidate_counts = [], [], [], []
     section_enabled = mode == "hybrid_section_rerank"
@@ -546,6 +547,8 @@ def _run_mode(
                 ),
                 "trace": trace.as_dict() if trace else None,
             })
+    if not summarize:
+        return {"rows": rows, "latencies_ms": latencies}
     report = _summary_metrics(queries, rows)
     report["latency_ms_median"] = statistics.median(latencies)
     report["latency_ms_p95"] = sorted(latencies)[max(0, round(len(latencies) * .95) - 1)]
@@ -923,14 +926,14 @@ def _summarize_evidence(rows: list[dict]) -> dict:
     }
 
 
-def _evidence_report(queries: list[dict], documents: list[Document]) -> dict:
+def _evidence_report(queries: list[dict], documents: list[Document], *, summarize: bool = True) -> dict:
     documents_by_chunk = {str(item.metadata.get("chunk_id", "")): item for item in documents}
     rows = []
     for query in queries:
         result = rag_core.retrieve_docs(query["query"], k=5, knowledge_base_id=FULL_BENCHMARK_KNOWLEDGE_BASE_ID, retrieval_mode="hybrid")
         evidence = rag_core.analyze_evidence(query["query"], result, "hybrid")
         rows.append(_evidence_row(query, result, evidence, documents_by_chunk))
-    return _summarize_evidence(rows)
+    return _summarize_evidence(rows) if summarize else {"rows": rows}
 
 
 def _support_candidate_rows(queries: list[dict], documents: list[Document], reranker) -> tuple[list[dict], dict[str, dict]]:
