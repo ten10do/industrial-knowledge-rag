@@ -174,6 +174,15 @@ def test_metrics_ranking_gap_and_failure_taxonomy():
     assert report["overall"]["ranking_gap"] == 1
     assert report["failure_summary"]["RANKING_FAILURE"] == 1
     assert report["failure_summary"]["OOD_FALSE_POSITIVE"] == 1
+
+
+def test_metrics_allow_a_warmup_subset_without_ood_queries():
+    queries = [{
+        "query_id": "warmup", "answerable": True, "category": "procedure", "query_type": "procedure",
+        "expected_equipment_model": "", "expected_error_code": "", "expected_section": "", "relevant_chunk_ids": ["chunk-a"],
+    }]
+    report = evaluate_rows(queries, [{"query_id": "warmup", "rank": 1, "refused": False, "candidates": []}])
+    assert report["overall"]["ood_refusal_accuracy"] is None
     assert set(report["failure_summary"]) == set(FAILURE_TYPES)
 
 

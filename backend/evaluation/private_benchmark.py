@@ -22,6 +22,11 @@ from backend.evaluation.full_vector_benchmark import (
 )
 from backend.evaluation.retrieval_benchmark import benchmark_knowledge_base
 from backend.evaluation.retrieval_observability import analyze_observability, write_trace_artifacts
+from backend.evaluation.multi_corpus_validation import (
+    enriched_annotation_hash,
+    query_text_hash,
+    validate_annotation_enrichment,
+)
 from backend.retrieval import RetrievalCandidate, RetrievalResult, analyze_query
 from backend.retrieval.evidence_support import skipped_support, validate_evidence_support
 from backend.retrieval.section import normalize_section
@@ -44,6 +49,10 @@ PRIVATE_CATEGORIES = {
     "identifier", "fault", "parameter", "semantic", "procedure", "safety",
     "maintenance", "mixed", "comparison", "ood",
 }
+ENRICHMENT_QUERY_FIELDS = {
+    "expected_subsection", "expected_sections", "evidence_label",
+    "support_label", "support_gate_truth", "ood_type",
+}
 CORE_PRIVATE_MODES = ("bm25", "vector", "hybrid", "hybrid_rerank")
 PRIVATE_MODES = (*CORE_PRIVATE_MODES, "hybrid_section_rerank")
 FALSE_REFUSAL_REASONS = {
@@ -59,6 +68,21 @@ def annotation_hash(manifest: dict) -> str:
     """Hash only the frozen labels, not local paths or downloaded file bytes."""
     frozen = {"documents": manifest["documents"], "queries": manifest["queries"]}
     payload = json.dumps(frozen, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def original_annotation_hash(manifest: dict) -> str:
+    """Reconstruct the pre-V3.10 annotation payload before validating enrichment."""
+    original_queries = []
+    for query in manifest["queries"]:
+        original = {key: value for key, value in query.items() if key not in ENRICHMENT_QUERY_FIELDS}
+        # Corpus B's frozen schema already included an empty expected_section field.
+        original["expected_section"] = ""
+        original_queries.append(original)
+    payload = json.dumps(
+        {"documents": manifest["documents"], "queries": original_queries},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -111,7 +135,18 @@ def load_private_manifest(path: Path) -> dict:
             raise ValueError("Private answerable flag must match relevant chunks.")
         query_ids.add(item["query_id"])
     frozen_hash = manifest.get("freeze", {}).get("annotation_sha256")
-    if frozen_hash and frozen_hash != annotation_hash(manifest):
+    enrichment = manifest.get("annotation_enrichment")
+    if enrichment:
+        if frozen_hash != original_annotation_hash(manifest):
+            raise ValueError("Private original annotation hash does not match the frozen manifest.")
+        if enrichment.get("original_annotation_sha256") != frozen_hash:
+            raise ValueError("V3.10 original annotation hash is inconsistent.")
+        validate_annotation_enrichment(manifest)
+        if enrichment.get("original_query_sha256") != query_text_hash(manifest):
+            raise ValueError("V3.10 query text hash is inconsistent.")
+        if enrichment.get("enriched_annotation_sha256") != enriched_annotation_hash(manifest):
+            raise ValueError("V3.10 enriched annotation hash is inconsistent.")
+    elif frozen_hash and frozen_hash != annotation_hash(manifest):
         raise ValueError("Private annotation hash does not match the frozen manifest.")
     return manifest
 
@@ -657,6 +692,13 @@ def _section_metrics(queries: list[dict], baseline: dict, section: dict) -> dict
     }
 
 
+def _expected_supported(query: dict) -> bool:
+    """Use V3.10 support truth when present, retaining historical fixtures."""
+    if query.get("support_gate_truth") in {"SUPPORTED", "INSUFFICIENT"}:
+        return query["support_gate_truth"] == "SUPPORTED"
+    return bool(query.get("supported", query.get("answerable", False)))
+
+
 def _report_support(queries: list[dict], report: dict, documents: list[Document]) -> dict:
     documents_by_chunk = {str(item.metadata.get("chunk_id", "")): item for item in documents}
     report_rows = {item["query_id"]: item for item in report["rows"]}
@@ -684,7 +726,7 @@ def _report_support(queries: list[dict], report: dict, documents: list[Document]
         support = validate_evidence_support(query["query"], result, documents)
         rows.append({
             "query_id": query["query_id"],
-            "expected_supported": bool(query.get("supported", query.get("answerable"))),
+            "expected_supported": _expected_supported(query),
             "status": support.status,
             "missing_requirements": list(support.missing_requirements),
             "supporting_chunks": list(support.supporting_chunks),
@@ -695,15 +737,12 @@ def _report_support(queries: list[dict], report: dict, documents: list[Document]
 def _support_recovery(queries: list[dict], baseline: dict, section: dict) -> dict:
     before = {item["query_id"]: item for item in baseline["rows"]}
     after = {item["query_id"]: item for item in section["rows"]}
-    def expected_supported(item: dict) -> bool:
-        return bool(item.get("supported", item.get("answerable")))
-
     def support_status(item: dict) -> str:
         return str(item.get("status") or item.get("support", {}).get("status", "UNKNOWN"))
 
     recoverable = [
         item for item in queries
-        if expected_supported(item) and support_status(before[item["query_id"]]) != "SUPPORTED"
+        if _expected_supported(item) and support_status(before[item["query_id"]]) != "SUPPORTED"
     ]
     recovered = [
         item for item in recoverable
@@ -711,11 +750,11 @@ def _support_recovery(queries: list[dict], baseline: dict, section: dict) -> dic
     ]
     lost = [
         item for item in queries
-        if expected_supported(item)
+        if _expected_supported(item)
         and support_status(before[item["query_id"]]) == "SUPPORTED"
         and support_status(after[item["query_id"]]) != "SUPPORTED"
     ]
-    negatives = [item for item in queries if not expected_supported(item)]
+    negatives = [item for item in queries if not _expected_supported(item)]
     baseline_false_support = [
         item for item in negatives if support_status(before[item["query_id"]]) == "SUPPORTED"
     ]
@@ -960,7 +999,7 @@ def _support_report(
             else skipped_support()
         )
         latencies.append((time.perf_counter() - started) * 1000)
-        expected = bool(query.get("supported", query.get("answerable", False)))
+        expected = _expected_supported(query)
         gate_refused = base["decision"] == "ABSTAIN" or support.status == "INSUFFICIENT"
         predicted_supported = not gate_refused
         if base["decision"] == "ABSTAIN":

@@ -125,9 +125,10 @@ def evaluate_rows(queries: list[dict], rows: list[dict]) -> dict:
 
     overall = metrics([rows_by_id[query["query_id"]] for query in answerable])
     ood = [query for query in queries if not query["answerable"]]
-    overall["ood_refusal_accuracy"] = sum(
-        rows_by_id[query["query_id"]]["refused"] for query in ood
-    ) / len(ood)
+    overall["ood_refusal_accuracy"] = (
+        sum(rows_by_id[query["query_id"]]["refused"] for query in ood) / len(ood)
+        if ood else None
+    )
     overall["ranking_gap"] = overall["recall_at_5"] - overall["hit_rate_at_1"]
     return {
         "overall": overall,
