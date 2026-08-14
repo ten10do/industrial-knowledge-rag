@@ -3,7 +3,7 @@ langchain
 langchain-community
 langchain-chroma
 chromadb
-pypdf
+pypdf[crypto]
 python-dotenv
 sentence-transformers
 groq
