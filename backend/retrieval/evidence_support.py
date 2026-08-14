@@ -23,7 +23,7 @@ from .technical import (
 )
 
 
-SUPPORT_RULE_VERSION = "support-v313.1"
+SUPPORT_RULE_VERSION = "support-v315.1"
 
 
 class EvidenceIntent(str, Enum):
@@ -57,6 +57,11 @@ class SupportReason(str, Enum):
     MISSING_REQUESTED_ACTION = "MISSING_REQUESTED_ACTION"
     MISSING_REQUESTED_LOCATION = "MISSING_REQUESTED_LOCATION"
     MISSING_PARAMETER_VALUE = "MISSING_PARAMETER_VALUE"
+    MISSING_ATTRIBUTE_SUPPORT = "MISSING_ATTRIBUTE_SUPPORT"
+    MISSING_VALUE_SUPPORT = "MISSING_VALUE_SUPPORT"
+    MISSING_UNIT_SUPPORT = "MISSING_UNIT_SUPPORT"
+    MISSING_REQUIREMENT_SUPPORT = "MISSING_REQUIREMENT_SUPPORT"
+    MISSING_COMPATIBILITY_SUPPORT = "MISSING_COMPATIBILITY_SUPPORT"
     MISSING_IDENTIFIER_SUPPORT = "MISSING_IDENTIFIER_SUPPORT"
     PARTIAL_EVIDENCE_ONLY = "PARTIAL_EVIDENCE_ONLY"
     MODEL_MISMATCH = "MODEL_MISMATCH"
@@ -94,6 +99,10 @@ CONCEPT_ALIASES = {
     ),
     "firewall": ("firewall", "network firewall"),
     "tls_cipher": ("tls cipher", "cipher suite", "cipher suites", "cipher restriction"),
+    "subnet_mask": ("subnet mask", "network mask"),
+    "temperature_sensor": ("temperature sensor", "thermal sensor"),
+    "megger_test": ("megger test", "insulation resistance measurement"),
+    "dip_switch": ("dip switch", "dip-switch"),
 }
 
 ACTION_ALIASES = {
@@ -113,6 +122,7 @@ ACTION_ALIASES = {
     ),
     "install": ("install", "installation", "mount", "mounting"),
     "reinstall": ("reinstall", "re-install"),
+    "disconnect": ("disconnect", "remove connection", "remove all connections"),
 }
 
 ATTRIBUTE_ALIASES = {
@@ -121,20 +131,65 @@ ATTRIBUTE_ALIASES = {
     "accuracy": CONCEPT_ALIASES["accuracy"],
     "voltage": ("电压", "voltage", "volt"),
     "quantity": ("多少个", "最大数量", "最多", "maximum", "max."),
-    "status": ("什么状态", "状态", "status", "state", "fault"),
+    "status": ("什么状态", "状态", "status", "state", "fault status"),
     "cause": (
-        "为什么", "原因", "cause", "reason", "because", "verif", "mandatory",
-        "required", "grandmaster", "ensure", "so that", "allows", "enables",
+        "为什么", "原因", "cause", "reason", "because",
     ),
     "resistance": ("阻值", "欧姆", "resistance", "ohm", "ω", "Ω"),
     "compatibility": ("compatibility", "compatible", "compatible with"),
     "requirements": (
-        "requirement", "requirements", "required", "mandatory", "must",
-        "prerequisite", "prerequisites", "restriction", "restrictions",
-        "condition", "conditions", "important",
+        "requirement", "requirements", "prerequisite", "prerequisites",
+        "restriction", "restrictions", "condition", "conditions",
     ),
     "version": ("version", "versions", "revision", "revisions", "device model", "devicemodel"),
+    "default_value": ("default value", "by default", "default"),
+    "range": ("supported range", "permitted range", "acceptable range", "range"),
+    "rated_value": ("rated value", "rated voltage", "rated current", "rated"),
+    "temperature": ("ambient temperature", "temperature"),
+    "cable_length": ("cable length", "segment length", "transmission distance"),
+    "data_size": ("data size", "data sizes", "input and output data", "process data size"),
+    "subnet_mask": CONCEPT_ALIASES["subnet_mask"],
+    "username": ("username", "user name", "login name"),
+    "password": ("password", "login password"),
+    "switch_position": ("switch position", "dip-switch position", "dip switch position"),
+    "torque": ("torque", "tightening torque"),
+    "manufacturer": ("manufacturer", "vendor", "maker"),
+    "timer_values": ("timer values", "timer number", "completion flag", "present value"),
 }
+
+ATTRIBUTE_EVIDENCE_ALIASES = {
+    **ATTRIBUTE_ALIASES,
+    "threshold": (*ATTRIBUTE_ALIASES["threshold"], "or fewer", "or less", "at least", "at most"),
+    "quantity": (*ATTRIBUTE_ALIASES["quantity"], "maximum", "minimum", "max", "min", "数量", "最大", "最小"),
+    "version": (*ATTRIBUTE_ALIASES["version"], "firmware", "software", "build", "or later", "and above", "版本"),
+    "requirements": (*ATTRIBUTE_ALIASES["requirements"], "required", "mandatory", "must", "before", "only if"),
+    "default_value": (*ATTRIBUTE_ALIASES["default_value"], "initial", "factory default"),
+    "range": (*ATTRIBUTE_ALIASES["range"], "variation", "from", " to ", "...", "…"),
+    "rated_value": (*ATTRIBUTE_ALIASES["rated_value"], "nominal"),
+    "cable_length": (*ATTRIBUTE_ALIASES["cable_length"], "电缆长度", "最长"),
+    "data_size": (*ATTRIBUTE_ALIASES["data_size"], "input data", "output data", "kbyte", "byte", "数据量", "输入数据", "输出数据"),
+    "switch_position": (*ATTRIBUTE_ALIASES["switch_position"], "position"),
+}
+
+VALUE_KIND_PATTERNS = {
+    "default": re.compile(r"\bdefault\b|factory default", re.IGNORECASE),
+    "range": re.compile(r"\brange\b|permitted|acceptable variation", re.IGNORECASE),
+    "maximum": re.compile(r"\bmaximum\b|\bmax\.?\b", re.IGNORECASE),
+    "minimum": re.compile(r"\bminimum\b|\bmin\.?\b", re.IGNORECASE),
+    "rated": re.compile(r"\brated\b|\bnominal\b", re.IGNORECASE),
+    "duration": re.compile(r"\bhow long\b|waiting time|wait time", re.IGNORECASE),
+    "exact": re.compile(r"\b(?:what|which)\b.{0,80}\b(?:value|limit|length|size|voltage|temperature|torque|address)\b", re.IGNORECASE),
+}
+
+REQUIREMENT_TYPE_PATTERNS = (
+    ("compatibility", re.compile(r"compatib|supported combination", re.IGNORECASE)),
+    ("prerequisite", re.compile(r"prerequisite|\bbefore\b|prior to", re.IGNORECASE)),
+    ("version", re.compile(r"version|revision|firmware|software build", re.IGNORECASE)),
+    ("installation", re.compile(r"install|mount|wiring", re.IGNORECASE)),
+    ("configuration", re.compile(r"configur|\bset(?:ting)?\b|assign", re.IGNORECASE)),
+    ("safety", re.compile(r"safety|hazard|danger|warning", re.IGNORECASE)),
+    ("maintenance", re.compile(r"maintenance|service|replace|restore", re.IGNORECASE)),
+)
 
 UNIT_PATTERN = re.compile(
     r"(?<![a-z0-9])(?:n\s*[·路.]?\s*m|v|volt|volts|amp|amps|ampere|amperes|hz|khz|mhz|s|sec|second|seconds|ms|μs|us|%|°c)(?![a-z0-9])",
@@ -143,6 +198,13 @@ UNIT_PATTERN = re.compile(
 VALUE_PATTERN = re.compile(r"(?<![a-z0-9])[-+]?\d+(?:\.\d+)?\s*(?:%|[a-zμ°]+)?", re.IGNORECASE)
 REQUESTED_VALUE_PATTERN = re.compile(
     r"(?<![a-z0-9])[-+]?\d+(?:\.\d+)?\s*(?:%|n\s*[·路.]?\s*m|v|a|hz|khz|mhz|ms|μs|us|°c)(?![a-z0-9])",
+    re.IGNORECASE,
+)
+
+V315_UNIT_PATTERN = re.compile(
+    r"(?<![a-z0-9])(?:n\s*[·⋅-]?\s*m|lb\s*[·⋅-]?\s*in|v(?:ac|dc)?|volt|volts|"
+    r"amp|amps|ampere|amperes|hz|khz|mhz|rpm|s|sec|second|seconds|ms|μs|us|"
+    r"%|°c|°f|mm|cm|m|ft|byte|kbyte|kb)(?![a-z0-9])",
     re.IGNORECASE,
 )
 
@@ -160,12 +222,16 @@ class EvidenceRequirement:
     requested_protocol: tuple[str, ...] = ()
     requested_location: bool = False
     specificity: str = EvidenceSpecificity.GENERAL.value
+    requested_value_kind: tuple[str, ...] = ()
+    requested_requirement_type: str = "general"
+    requested_qualifiers: tuple[str, ...] = ()
 
     def as_dict(self) -> dict:
         payload = asdict(self)
         for key in (
             "identifiers", "requested_concepts", "requested_attributes",
-            "requested_action", "requested_protocol",
+            "requested_action", "requested_protocol", "requested_value_kind",
+            "requested_qualifiers",
         ):
             payload[key] = list(payload[key])
         return payload
@@ -215,6 +281,42 @@ def _contains_alias(text: str, aliases: tuple[str, ...]) -> bool:
 
 def _matched_groups(text: str, groups: dict[str, tuple[str, ...]]) -> tuple[str, ...]:
     return tuple(name for name, aliases in groups.items() if _contains_alias(text, aliases))
+
+
+def _requested_value_kinds(query: str) -> tuple[str, ...]:
+    normalized = _normalize(query)
+    return tuple(name for name, pattern in VALUE_KIND_PATTERNS.items() if pattern.search(normalized))
+
+
+def _requested_requirement_type(query: str) -> str:
+    normalized = _normalize(query)
+    for name, pattern in REQUIREMENT_TYPE_PATTERNS:
+        if pattern.search(normalized):
+            return name
+    return "general"
+
+
+def _requested_qualifiers(
+    query: str, analysis: QueryAnalysis, identifiers: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Extract model-like qualifiers without adding vendor-specific knowledge."""
+    model = _normalize(analysis.equipment_model)
+    identifier_set = {_normalize(item) for item in identifiers}
+    tokens = re.findall(
+        r"(?<![a-z0-9-])(?:[a-z]{2,}[a-z0-9-]*\d[a-z0-9-]*|[a-z]+\d[a-z0-9-]+)(?![a-z0-9-])",
+        _normalize(query), re.IGNORECASE,
+    )
+    tokens.extend(re.findall(
+        r"(?<![a-z0-9-])([a-z][a-z0-9-]{2,})\s+(?:firmware\s+|software\s+|unit\s+)?(?:versions?|revision)",
+        _normalize(query), re.IGNORECASE,
+    ))
+    return tuple(dict.fromkeys(
+        token.upper() for token in tokens
+        if _normalize(token) not in identifier_set
+        and _normalize(token) != model
+        and _normalize(token) not in model
+        and _normalize(token) not in {"which", "what", "minimum", "required"}
+    ))
 
 
 def _intent(query: str, identifiers: tuple[str, ...]) -> EvidenceIntent:
@@ -275,17 +377,20 @@ def build_evidence_requirement(
         normalized,
         re.IGNORECASE,
     ))
-    unit_match = UNIT_PATTERN.search(normalized)
+    unit_match = V315_UNIT_PATTERN.search(normalized)
     requested_unit = _normalize(unit_match.group(0)) if unit_match else ""
     value_match = REQUESTED_VALUE_PATTERN.search(normalized)
     requested_value = value_match.group(0).strip() if value_match else ""
+    requested_value_kind = _requested_value_kinds(normalized)
+    requested_requirement_type = _requested_requirement_type(normalized)
+    requested_qualifiers = _requested_qualifiers(query, analysis, identifiers)
     intent = _intent(normalized, identifiers)
     has_identity = bool(
         analysis.equipment_model or analysis.product_series
         or analysis.product_family or analysis.product_identities
     )
     specificity = EvidenceSpecificity.GENERAL
-    if protocols or identifiers or requested_unit or requested_location or len(concepts) >= 2:
+    if protocols or identifiers or requested_unit or requested_location or requested_qualifiers or len(concepts) >= 2:
         specificity = EvidenceSpecificity.HIGHLY_SPECIFIC
     elif has_identity or concepts or attributes or actions:
         specificity = EvidenceSpecificity.SPECIFIC
@@ -301,6 +406,9 @@ def build_evidence_requirement(
         requested_protocol=protocols,
         requested_location=requested_location,
         specificity=specificity.value,
+        requested_value_kind=requested_value_kind,
+        requested_requirement_type=requested_requirement_type,
+        requested_qualifiers=requested_qualifiers,
     )
 
 
@@ -332,16 +440,20 @@ def _unit_supported(requested_unit: str, evidence_text: str) -> bool:
         "sec": ("s", "sec", "second", "seconds"),
         "second": ("s", "sec", "second", "seconds"),
         "seconds": ("s", "sec", "second", "seconds"),
+        "n m": (r"n\s*[·⋅-]?\s*m",),
+        "n·m": (r"n\s*[·⋅-]?\s*m",),
+        "nm": (r"n\s*[·⋅-]?\s*m",),
+        "v ac": ("v ac", "vac", "v"),
+        "vac": ("vac", "v ac", "v"),
+        "v dc": ("v dc", "vdc", "v"),
+        "vdc": ("vdc", "v dc", "v"),
     }
     normalized_unit = _normalize(requested_unit)
-    return any(
-        re.search(
-            rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])",
-            evidence_text,
-            re.IGNORECASE,
-        )
-        for alias in aliases.get(normalized_unit, (normalized_unit,))
-    )
+    for alias in aliases.get(normalized_unit, (normalized_unit,)):
+        pattern = alias if "\\s" in alias else re.escape(alias)
+        if re.search(rf"(?<![a-z0-9]){pattern}(?![a-z0-9])", evidence_text, re.IGNORECASE):
+            return True
+    return False
 
 
 def _location_supported(candidates: list) -> bool:
@@ -354,12 +466,191 @@ def _location_supported(candidates: list) -> bool:
     return False
 
 
+def _value_kind_supported(kind: str, text: str) -> bool:
+    has_value = bool(
+        VALUE_PATTERN.search(text)
+        or re.search(r"\b(?:enabled|disabled|enable|disable|admin)\b", text, re.IGNORECASE)
+        or re.search(r"\b(?:0x[0-9a-f]+|\d{1,3}(?:\.\d{1,3}){3})\b", text, re.IGNORECASE)
+    )
+    patterns = {
+        "default": r"\bdefault\b|factory default|initial|\bdef\b",
+        "range": r"\brange\b|variation|\d(?:\.\d+)?\s*(?:…|\.\.\.|to)\s*\d|范围|变化范围",
+        "maximum": r"\bmaximum\b|\bmax\.?\b|at most|no more than|or fewer|最大|最长",
+        "minimum": r"\bminimum\b|\bmin\.?\b|at least|or later|以上|最小",
+        "rated": r"\brated\b|\bnominal\b|额定",
+        "duration": r"\d+(?:\.\d+)?\s*(?:ms|s|sec|seconds?|minutes?|mins?|hours?|hrs?)\b",
+        "exact": r"",
+    }
+    if kind == "default":
+        default_marker = bool(
+            re.search(patterns[kind], text, re.IGNORECASE)
+            or contains_term(text, ("default", "factory default", "initial"))
+        )
+        if default_marker:
+            return has_value
+        # Common parameter tables put the default on one line immediately before the range.
+        return bool(re.search(r"\d+(?:\.\d+)?\s*%?\s+\d+(?:\.\d+)?\s*(?:…|\.\.\.|to)\s*\d", text, re.IGNORECASE))
+    return has_value and (not patterns[kind] or bool(re.search(patterns[kind], text, re.IGNORECASE)))
+
+
+def _attribute_supported(attribute: str, text: str) -> bool:
+    value_kind = {
+        "default_value": "default", "range": "range", "rated_value": "rated",
+    }.get(attribute)
+    if value_kind and _value_kind_supported(value_kind, text):
+        return True
+    return _contains_alias(text, ATTRIBUTE_EVIDENCE_ALIASES[attribute])
+
+
+def _qualifier_supported(qualifier: str, text: str) -> bool:
+    normalized = _normalize(qualifier)
+    return re.search(
+        rf"(?<![a-z0-9]){re.escape(normalized)}(?:[a-z0-9]{{1,4}}(?![a-z0-9])|(?=[^a-z0-9])|$)",
+        text, re.IGNORECASE,
+    ) is not None
+
+
+def _version_requirement_supported(requirement: EvidenceRequirement, text: str) -> bool:
+    value_markers = list(re.finditer(
+        r"(?:version|revision|firmware|build|版本)\s*[:：]?\s*\d+(?:\.\d+)*|"
+        r"\d+(?:\.\d+)+\s*(?:版本|version|revision|build)",
+        text, re.IGNORECASE,
+    ))
+    if not value_markers:
+        return False
+    if not requirement.requested_qualifiers:
+        return True
+    for qualifier in requirement.requested_qualifiers:
+        qualifier_matches = list(re.finditer(
+            rf"(?<![a-z0-9]){re.escape(_normalize(qualifier))}[a-z0-9]{{0,4}}(?![a-z0-9])",
+            text, re.IGNORECASE,
+        ))
+        if not qualifier_matches or not any(
+            abs(marker.start() - match.end()) <= 60
+            for marker in value_markers for match in qualifier_matches
+        ):
+            return False
+    return True
+
+
+def _requirement_type_supported(requirement: EvidenceRequirement, text: str) -> bool:
+    requirement_type = requirement.requested_requirement_type
+    if requirement_type == "compatibility":
+        return bool(re.search(r"compatib|\bsupports?\b|required.{0,50}(?:adapter|module)|兼容|支持", text, re.IGNORECASE))
+    if requirement_type == "prerequisite":
+        return bool(re.search(r"prerequisite|\bbefore\b|prior to|\brequired\b|\bmust\b|前|必须", text, re.IGNORECASE))
+    if requirement_type == "version":
+        return _version_requirement_supported(requirement, text)
+    return True
+
+
+def _implicit_unit_supported(requirement: EvidenceRequirement, text: str) -> bool:
+    attributes = set(requirement.requested_attributes)
+    concepts = set(requirement.requested_concepts)
+    checks = []
+    if "voltage" in attributes:
+        checks.append(r"\d+(?:\.\d+)?\s*v(?:ac|dc)?\b")
+    if "temperature" in attributes or "temperature_sensor" in concepts:
+        checks.append(r"\d+(?:\.\d+)?\s*°?\s*[cf]\b")
+    if "torque" in attributes:
+        checks.append(r"\d+(?:\.\d+)?\s*(?:n\s*[·⋅-]?\s*m|lb\s*[·⋅-]?\s*in|%)")
+    if "cable_length" in attributes:
+        checks.append(r"\d+(?:\.\d+)?\s*(?:mm|cm|m|ft)\b")
+    if "data_size" in attributes:
+        checks.append(r"\d+(?:\.\d+)?\s*(?:byte|kbyte|kb)\b")
+    if "waiting_time" in attributes:
+        checks.append(r"\d+(?:\.\d+)?\s*(?:ms|s|sec|seconds?|minutes?|mins?|hours?|hrs?)\b")
+    if "residual_energy" in concepts:
+        checks.append(r"\d+(?:\.\d+)?\s*(?:μj|uj|microjoules?|joules?|j)\b")
+    return all(re.search(pattern, text, re.IGNORECASE) for pattern in checks)
+
+
+def _identifier_attribute_associated(
+    requirement: EvidenceRequirement, text: str,
+) -> bool:
+    if not requirement.identifiers:
+        return True
+    target_positions = [
+        match.start() for identifier in requirement.identifiers
+        for match in re.finditer(re.escape(_normalize(identifier)), text, re.IGNORECASE)
+    ]
+    if not target_positions:
+        return False
+    strong_attributes = [
+        name for name in requirement.requested_attributes
+        if name not in {"requirements", "cause", "status", "quantity"}
+    ]
+    if not strong_attributes:
+        return True
+    other_identifiers = [match.start() for match in re.finditer(
+        r"(?<![a-z0-9])(?:\d{1,2}\.\d{1,2}|[a-z]\d{2,5})(?![a-z0-9])", text, re.IGNORECASE,
+    ) if all(abs(match.start() - target) > 1 for target in target_positions)]
+    attribute_positions = [
+        match.start() for attribute in strong_attributes
+        for alias in ATTRIBUTE_EVIDENCE_ALIASES[attribute]
+        for match in re.finditer(re.escape(_normalize(alias)), text, re.IGNORECASE)
+        if alias and not any(token in alias for token in (".*", "(", "\\", "|", "[", "]"))
+    ]
+    if not attribute_positions:
+        return True
+    for target in target_positions:
+        for attribute in attribute_positions:
+            low, high = sorted((target, attribute))
+            if not any(low < other < high for other in other_identifiers):
+                return True
+    return False
+
+
+def _local_value_supported(requirement: EvidenceRequirement, candidates: list) -> bool:
+    needs_value = bool(
+        requirement.requested_value or requirement.requested_value_kind
+        or EvidenceIntent(requirement.intent) == EvidenceIntent.PARAMETER_VALUE
+    )
+    if not needs_value and not requirement.requested_unit:
+        return True
+    for candidate in candidates:
+        text = _normalize(candidate.document.page_content)
+        if requirement.identifiers and not all(
+            contains_parameter_identifier(text, identifier) for identifier in requirement.identifiers
+        ):
+            continue
+        if requirement.requested_qualifiers and not all(
+            _qualifier_supported(item, text) for item in requirement.requested_qualifiers
+        ):
+            continue
+        if requirement.requested_protocol and not all(
+            _contains_alias(text, PROTOCOL_ALIASES[item]) for item in requirement.requested_protocol
+        ):
+            continue
+        if requirement.requested_concepts and not all(
+            _contains_alias(text, CONCEPT_ALIASES[item]) for item in requirement.requested_concepts
+        ):
+            continue
+        if not all(_attribute_supported(item, text) for item in requirement.requested_attributes):
+            continue
+        if not _identifier_attribute_associated(requirement, text):
+            continue
+        if requirement.requested_value and requirement.requested_value.casefold() not in text:
+            continue
+        if requirement.requested_unit and not _unit_supported(requirement.requested_unit, text):
+            continue
+        if not all(_value_kind_supported(kind, text) for kind in requirement.requested_value_kind):
+            continue
+        if not _implicit_unit_supported(requirement, text):
+            continue
+        if EvidenceIntent(requirement.intent) == EvidenceIntent.PARAMETER_VALUE and not VALUE_PATTERN.search(text):
+            continue
+        return True
+    return False
+
+
 def validate_evidence_support(query: str, result, documents: list | None = None) -> EvidenceSupport:
     candidates = list(getattr(result, "candidates", []) or [])
     corpus = list(documents if documents is not None else getattr(result, "corpus_documents", []) or [])
     analysis = getattr(result, "query_analysis", None) or analyze_query(query, corpus)
     requirement = build_evidence_requirement(query, corpus, analysis)
-    evidence_text = _normalize("\n".join(str(candidate.document.page_content) for candidate in candidates))
+    candidate_texts = [_normalize(candidate.document.page_content) for candidate in candidates]
+    evidence_text = _normalize("\n".join(candidate_texts))
 
     identities = _query_identities(analysis)
     identity_supported = not identities or all(
@@ -401,13 +692,21 @@ def validate_evidence_support(query: str, result, documents: list | None = None)
         for action in requirement.requested_action
     }
     attribute_hits = {
-        attribute: _contains_alias(evidence_text, ATTRIBUTE_ALIASES[attribute])
+        attribute: _attribute_supported(attribute, evidence_text)
         for attribute in requirement.requested_attributes
     }
-    unit_supported = _unit_supported(requirement.requested_unit, evidence_text)
+    qualifier_hits = {
+        qualifier: _qualifier_supported(qualifier, evidence_text)
+        for qualifier in requirement.requested_qualifiers
+    }
+    requirement_type_supported = _requirement_type_supported(requirement, evidence_text)
+    unit_supported = not requirement.requested_unit or any(
+        _unit_supported(requirement.requested_unit, text) for text in candidate_texts
+    )
     location_supported = not requirement.requested_location or _location_supported(candidates)
     value_supported = not requirement.requested_value or requirement.requested_value.casefold() in evidence_text
     parameter_value_supported = bool(VALUE_PATTERN.search(evidence_text))
+    local_value_supported = _local_value_supported(requirement, candidates)
 
     missing = []
     if not identity_supported:
@@ -415,6 +714,13 @@ def validate_evidence_support(query: str, result, documents: list | None = None)
     missing.extend(f"identifier:{name}" for name, supported in identifier_hits.items() if not supported)
     missing.extend(f"protocol:{name}" for name, supported in protocol_hits.items() if not supported)
     missing.extend(f"concept:{name}" for name, supported in concept_hits.items() if not supported)
+    missing.extend(f"qualifier:{name}" for name, supported in qualifier_hits.items() if not supported)
+    if requirement.requested_requirement_type == "compatibility" and not requirement_type_supported:
+        missing.append("requirement_type:compatibility")
+    elif requirement.requested_requirement_type == "prerequisite" and not requirement_type_supported:
+        missing.append("requirement_type:prerequisite")
+    elif requirement.requested_requirement_type == "version" and not requirement_type_supported:
+        missing.append("requirement_type:version")
     action_required = EvidenceIntent(requirement.intent) in {
         EvidenceIntent.PROCEDURE,
         EvidenceIntent.FAULT_ACTION,
@@ -430,6 +736,8 @@ def validate_evidence_support(query: str, result, documents: list | None = None)
         missing.append("location")
     if not value_supported:
         missing.append(f"value:{requirement.requested_value}")
+    if not local_value_supported:
+        missing.append("value:local_association")
 
     intent = EvidenceIntent(requirement.intent)
     if intent == EvidenceIntent.PARAMETER_VALUE and not requirement.requested_attributes and not parameter_value_supported:
@@ -442,10 +750,17 @@ def validate_evidence_support(query: str, result, documents: list | None = None)
         "technical_concepts": concept_hits,
         "requested_actions": action_hits,
         "requested_attributes": attribute_hits,
+        "requested_qualifiers": qualifier_hits,
+        "requested_requirement_type": requirement_type_supported,
+        "requested_value_kinds": {
+            kind: any(_value_kind_supported(kind, text) for text in candidate_texts)
+            for kind in requirement.requested_value_kind
+        },
         "requested_unit": unit_supported,
         "requested_location": location_supported,
         "requested_value": value_supported,
         "parameter_value": parameter_value_supported,
+        "local_value_association": local_value_supported,
         "candidate_count": len(candidates),
     }
     supporting_chunks = tuple(
@@ -467,18 +782,30 @@ def validate_evidence_support(query: str, result, documents: list | None = None)
         status, reason = SupportStatus.INSUFFICIENT, SupportReason.MODEL_MISMATCH
     elif any(item.startswith("identifier:") for item in missing):
         status, reason = SupportStatus.INSUFFICIENT, SupportReason.MISSING_IDENTIFIER_SUPPORT
-    elif any(item.startswith(("protocol:", "concept:")) for item in missing):
+    elif any(item.startswith(("protocol:", "concept:", "qualifier:")) for item in missing):
         status, reason = SupportStatus.INSUFFICIENT, SupportReason.MISSING_REQUIRED_CONCEPT
+    elif "requirement_type:compatibility" in missing:
+        status, reason = SupportStatus.INSUFFICIENT, SupportReason.MISSING_COMPATIBILITY_SUPPORT
+    elif any(item.startswith("requirement_type:") for item in missing):
+        status, reason = SupportStatus.INSUFFICIENT, SupportReason.MISSING_REQUIREMENT_SUPPORT
     elif any(item.startswith("action:") for item in missing):
         status, reason = SupportStatus.INSUFFICIENT, SupportReason.MISSING_REQUESTED_ACTION
     elif "location" in missing:
         status, reason = SupportStatus.INSUFFICIENT, SupportReason.MISSING_REQUESTED_LOCATION
-    elif any(item.startswith(("attribute:", "unit:", "value:")) for item in missing) or "parameter_value" in missing:
-        status, reason = SupportStatus.INSUFFICIENT, SupportReason.MISSING_PARAMETER_VALUE
+    elif any(item.startswith("attribute:") for item in missing):
+        status, reason = SupportStatus.INSUFFICIENT, SupportReason.MISSING_ATTRIBUTE_SUPPORT
+    elif any(item.startswith("unit:") for item in missing):
+        status, reason = SupportStatus.INSUFFICIENT, SupportReason.MISSING_UNIT_SUPPORT
+    elif any(item.startswith("value:") for item in missing) or "parameter_value" in missing:
+        status, reason = SupportStatus.INSUFFICIENT, SupportReason.MISSING_VALUE_SUPPORT
+    elif any(item.startswith("requirement_type:") for item in missing):
+        status, reason = SupportStatus.INSUFFICIENT, SupportReason.MISSING_REQUIREMENT_SUPPORT
     elif not any((identities, requirement.identifiers, requirement.requested_protocol,
                   requirement.requested_concepts, requirement.requested_attributes,
                   requirement.requested_action, requirement.requested_unit,
-                  requirement.requested_value, requirement.requested_location)):
+                  requirement.requested_value, requirement.requested_location,
+                  requirement.requested_value_kind, requirement.requested_qualifiers,
+                  requirement.requested_requirement_type != "general")):
         status, reason = SupportStatus.UNKNOWN, SupportReason.NO_EXTRACTABLE_REQUIREMENT
     elif missing:
         status, reason = SupportStatus.INSUFFICIENT, SupportReason.PARTIAL_EVIDENCE_ONLY

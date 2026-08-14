@@ -44,10 +44,11 @@ class HoldoutValidationTests(unittest.TestCase):
         } for index in range(31)]
         manifest = {"documents": documents, "queries": queries, "freeze": {}}
         manifest["freeze"] = {"query_sha256": query_hash(manifest), "annotation_sha256": annotation_hash(manifest)}
-        validate_holdout_manifest(manifest)
-        manifest["freeze"]["query_sha256"] = "tampered"
-        with self.assertRaisesRegex(ValueError, "QUERY_HASH"):
+        with patch("backend.evaluation.v314_holdout_validation._assert_rule_identity"):
             validate_holdout_manifest(manifest)
+            manifest["freeze"]["query_sha256"] = "tampered"
+            with self.assertRaisesRegex(ValueError, "QUERY_HASH"):
+                validate_holdout_manifest(manifest)
 
     def test_category_manufacturer_and_failure_taxonomy(self):
         manifest = {"queries": [
@@ -80,7 +81,9 @@ class HoldoutValidationTests(unittest.TestCase):
     def test_artifact_replay_c_delegates_to_offline_replay(self):
         manifest = {"documents": [], "queries": []}
         path = Path("backend/evaluation/benchmark_private/v314_artifacts/test-c.json")
-        with patch("backend.evaluation.v314_holdout_validation.load_holdout_manifest", return_value=manifest), patch(
+        with patch("backend.evaluation.v314_holdout_validation._assert_rule_identity"), patch(
+            "backend.evaluation.v314_holdout_validation.load_holdout_manifest", return_value=manifest
+        ), patch(
             "backend.evaluation.v314_holdout_validation.replay_artifact", return_value={"validity": "VALID"}
         ) as replay:
             from backend.evaluation.v314_holdout_validation import replay_holdout_artifact
