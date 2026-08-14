@@ -16,6 +16,15 @@ from .product_identity import (
     identity_is_compatible,
     identity_relation,
 )
+from .technical import (
+    PROTOCOL_ALIASES,
+    contains_parameter_identifier,
+    contains_term,
+    extract_parameter_references,
+    foreign_equipment_signal,
+    matched_terms,
+    normalize_technical_text,
+)
 
 
 DETAIL_MARKERS = (
@@ -52,6 +61,10 @@ class DecisionReason(str, Enum):
     WEAK_RETRIEVAL_EVIDENCE = "WEAK_RETRIEVAL_EVIDENCE"
     MODEL_MISMATCH = "MODEL_MISMATCH"
     INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+    PROTOCOL_MISMATCH = "PROTOCOL_MISMATCH"
+    CROSS_EQUIPMENT = "CROSS_EQUIPMENT"
+    UNKNOWN_PARAMETER = "UNKNOWN_PARAMETER"
+    UNSUPPORTED_PROCEDURE = "UNSUPPORTED_PROCEDURE"
 
 
 @dataclass(frozen=True)
@@ -115,8 +128,12 @@ def _evidence_analysis(query: str, documents: list, base: QueryAnalysis | None) 
     if not model and not base.product_series and not base.product_family:
         model_match = EVIDENCE_MODEL_PATTERN.search(query or "")
         model = model_match.group(0) if model_match else ""
+    parameter_identifiers = {item.identifier for item in extract_parameter_references(query)}
+    generic_identifier = identifier.group(0).upper() if identifier else base.error_code
+    if generic_identifier.upper() in parameter_identifiers:
+        generic_identifier = ""
     return QueryAnalysis(
-        error_code=identifier.group(0).upper() if identifier else base.error_code,
+        error_code=generic_identifier,
         equipment_model=model,
         manufacturer=base.manufacturer,
         equipment_type=base.equipment_type,
@@ -178,6 +195,84 @@ def _detail_request_lacks_support(query: str, candidates: list) -> bool:
     return bool(requested) and not any(
         marker.replace("·", "") in content for marker in requested
     )
+
+
+def _candidate_text(candidates: list) -> str:
+    return "\n".join(
+        str(getattr(candidate.document, "page_content", "") or "")
+        for candidate in candidates
+    )
+
+
+def _unsupported_protocol(query: str, candidates: list) -> str | None:
+    """Return a requested protocol absent from the scoped evidence, if any."""
+    requested = matched_terms(normalize_technical_text(query), PROTOCOL_ALIASES)
+    if not requested:
+        return None
+    evidence = normalize_technical_text(_candidate_text(candidates))
+    for protocol in requested:
+        if not contains_term(evidence, PROTOCOL_ALIASES[protocol]):
+            return protocol
+    return None
+
+
+def _unknown_parameter(
+    query: str,
+    candidates: list,
+    documents: list,
+    analysis: QueryAnalysis,
+) -> str | None:
+    """Return a parameter/register literal absent from its product scope."""
+    references = extract_parameter_references(query)
+    if not references:
+        return None
+    identities = analysis.product_identities
+    if not identities:
+        identity = ProductIdentity(
+            manufacturer=analysis.manufacturer,
+            product_family=analysis.product_family,
+            product_series=analysis.product_series,
+            equipment_model=analysis.equipment_model,
+            aliases=((analysis.equipment_model,) if analysis.equipment_model else ()),
+        )
+        identities = (identity,) if any(
+            (identity.product_family, identity.product_series, identity.equipment_model)
+        ) else ()
+    scoped_documents = [
+        document for document in documents
+        if not identities or any(
+            identity_is_compatible(
+                identity,
+                identity_from_metadata(getattr(document, "metadata", {}) or {}),
+            )
+            for identity in identities
+        )
+    ]
+    evidence_documents = [candidate.document for candidate in candidates] + scoped_documents
+    for reference in references:
+        if not any(
+            contains_parameter_identifier(
+                getattr(document, "page_content", ""), reference.identifier,
+            )
+            for document in evidence_documents
+        ):
+            return reference.identifier
+    return None
+
+
+def _security_bypass_signal(query: str) -> bool:
+    """Detect a request to bypass authentication (reset/recover a credential the
+    requester no longer has). Manuals describe changing a password you already
+    know; they do not document recovering an unknown or lost administrator
+    credential without physical access."""
+    text = normalize_technical_text(query or "")
+    has_recovery = re.search(r"\b(reset\w*|recover\w*|restor\w*|bypass\w*|regain\w*|unlock\w*)", text) is not None
+    has_credential = re.search(r"\b(password\w*|passcode|credential|login|administrator account)", text) is not None
+    has_no_access = re.search(
+        r"\b(lost|forgot|forgotten|unknown|cannot|can't|without|no longer|no physical access|unable to reach)\b",
+        text,
+    ) is not None
+    return has_recovery and has_credential and has_no_access
 
 
 def analyze_retrieval_evidence(
@@ -272,6 +367,9 @@ def analyze_retrieval_evidence(
     )
 
     unsupported_detail = _detail_request_lacks_support(query, candidates)
+    foreign_equipment = foreign_equipment_signal(query, documents)
+    protocol_mismatch = _unsupported_protocol(query, candidates)
+    unknown_parameter = _unknown_parameter(query, candidates, documents, analysis)
     if analysis.error_code and analysis.error_code.lower() not in identifiers:
         decision, reason = Decision.ABSTAIN, DecisionReason.UNKNOWN_IDENTIFIER
     elif has_query_identity and not known_identity:
@@ -282,6 +380,14 @@ def analyze_retrieval_evidence(
         decision, reason = Decision.ABSTAIN, DecisionReason.MODEL_MISMATCH
     elif analysis.error_code and not exact_identifier:
         decision, reason = Decision.ABSTAIN, DecisionReason.UNKNOWN_IDENTIFIER
+    elif foreign_equipment is not None:
+        decision, reason = Decision.ABSTAIN, DecisionReason.CROSS_EQUIPMENT
+    elif protocol_mismatch is not None:
+        decision, reason = Decision.ABSTAIN, DecisionReason.PROTOCOL_MISMATCH
+    elif unknown_parameter is not None:
+        decision, reason = Decision.ABSTAIN, DecisionReason.UNKNOWN_PARAMETER
+    elif _security_bypass_signal(query):
+        decision, reason = Decision.ABSTAIN, DecisionReason.UNSUPPORTED_PROCEDURE
     elif unsupported_detail:
         decision, reason = Decision.ABSTAIN, DecisionReason.INSUFFICIENT_EVIDENCE
     elif exact_identifier:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-import unicodedata
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 
@@ -14,6 +13,13 @@ from .product_identity import (
     ProductIdentity,
     identity_from_metadata,
     identity_is_compatible,
+)
+from .technical import (
+    PROTOCOL_ALIASES,
+    contains_parameter_identifier,
+    contains_term,
+    extract_parameter_references,
+    normalize_technical_text,
 )
 
 
@@ -55,19 +61,15 @@ class SupportReason(str, Enum):
     BASE_EVIDENCE_ABSTAIN = "BASE_EVIDENCE_ABSTAIN"
 
 
-PROTOCOL_ALIASES = {
-    "profinet": ("profinet",),
-    "ethernet/ip": ("ethernet/ip", "ethernet ip"),
-    "modbus_tcp": ("modbus tcp", "modbus/tcp"),
-    "profibus": ("profibus",),
-    "cip_sync": ("cip sync", "cip sync™"),
-    "dlr": ("device-level ring", "device level ring", "dlr"),
-}
+# PROTOCOL_ALIASES is imported from .technical so the protocol registry stays in
+# a single, shared location for both the base Evidence gate and the Support gate.
 
 # Small, general industrial synonym groups. These bridge common Chinese query
 # phrasing to English manuals without claiming semantic support from similarity.
 CONCEPT_ALIASES = {
-    "device_name": ("设备名称", "设备名", "device name", "station name"),
+    "parameter": ("parameter", "param", "参数"),
+    "register": ("register", "寄存器"),
+    "device_name": ("设备名称", "设备名", "device name"),
     "ip_address": ("ip 地址", "ip地址", "ip address"),
     "node_address": ("节点地址", "node address"),
     "baud_rate": ("波特率", "baud rate"),
@@ -81,7 +83,11 @@ CONCEPT_ALIASES = {
     "dc_bus": ("直流母线", "dc bus", "dc-link", "dc link"),
     "network_topology": ("网络拓扑", "network topology"),
     "thermal_model": ("热模型", "thermal model"),
-    "input_power": ("主电源", "输入电源", "input power", "main power"),
+    "input_power": (
+        "主电源", "输入电源", "input power", "main power", "supply power",
+        "field-side power", "disconnect power", "remove power",
+        "power is removed", "power removed", "power supply",
+    ),
 }
 
 ACTION_ALIASES = {
@@ -94,7 +100,11 @@ ACTION_ALIASES = {
     "restart": ("重启", "restart", "auto-reset/run"),
     "enable": ("启用", "允许", "enable", "allow", "set.*(?:other than|greater than).*0"),
     "replace": ("替换", "更换", "replace", "replacement"),
-    "remove_power": ("断电", "切断电源", "断开主电源", "断开输入电源", "remove.*power", "disconnect.*power", "turn off power"),
+    "remove_power": (
+        "断电", "切断电源", "断开主电源", "断开输入电源", "remove.*power",
+        "disconnect.*power", "turn off power", "cut.*power", "cut off power",
+        "shut off power", "isolate.*power",
+    ),
 }
 
 ATTRIBUTE_ALIASES = {
@@ -174,17 +184,17 @@ def support_gate_enabled() -> bool:
 
 
 def _normalize(value: object) -> str:
-    text = unicodedata.normalize("NFKC", str(value or "")).casefold()
-    text = text.replace("/uni00a0", " ").replace("™", "")
-    return re.sub(r"\s+", " ", text).strip()
+    return normalize_technical_text(value)
 
 
 def _contains_alias(text: str, aliases: tuple[str, ...]) -> bool:
-    return any(re.search(alias, text, re.IGNORECASE) for alias in map(re.escape, aliases)) or any(
-        re.search(alias, text, re.IGNORECASE)
-        for alias in aliases
-        if ".*" in alias
-    )
+    for alias in aliases:
+        if any(token in alias for token in (".*", "(", "\\", "|", "[", "]")):
+            if re.search(alias, text, re.IGNORECASE):
+                return True
+        elif contains_term(text, (alias,)):
+            return True
+    return False
 
 
 def _matched_groups(text: str, groups: dict[str, tuple[str, ...]]) -> tuple[str, ...]:
@@ -232,7 +242,13 @@ def build_evidence_requirement(
 ) -> EvidenceRequirement:
     analysis = analysis or analyze_query(query, documents)
     normalized = _normalize(query)
-    identifiers = tuple(dict.fromkeys(match.upper() for match in IDENTIFIER_PATTERN.findall(query or "")))
+    parameter_identifiers = tuple(
+        reference.identifier for reference in extract_parameter_references(query)
+    )
+    identifiers = tuple(dict.fromkeys(
+        parameter_identifiers
+        + tuple(match.upper() for match in IDENTIFIER_PATTERN.findall(query or ""))
+    ))
     protocols = _matched_groups(normalized, PROTOCOL_ALIASES)
     concepts = _matched_groups(normalized, CONCEPT_ALIASES)
     attributes = _matched_groups(normalized, ATTRIBUTE_ALIASES)
@@ -290,16 +306,34 @@ def validate_evidence_support(query: str, result, documents: list | None = None)
         any(identity_is_compatible(identity, identity_from_metadata(candidate.metadata)) for candidate in candidates)
         for identity in identities
     )
+    parameter_identifiers = {
+        reference.identifier for reference in extract_parameter_references(query)
+    }
     identifier_hits = {
-        identifier: identifier.casefold() in evidence_text
+        identifier: (
+            contains_parameter_identifier(evidence_text, identifier)
+            if identifier in parameter_identifiers
+            else re.search(
+                rf"(?<![a-z0-9]){re.escape(identifier)}(?![a-z0-9])",
+                evidence_text,
+                re.IGNORECASE,
+            ) is not None
+        )
         for identifier in requirement.identifiers
     }
     protocol_hits = {
         protocol: _contains_alias(evidence_text, PROTOCOL_ALIASES[protocol])
         for protocol in requirement.requested_protocol
     }
+    identifier_concepts = {
+        reference.concept for reference in extract_parameter_references(query)
+    }
     concept_hits = {
-        concept: _contains_alias(evidence_text, CONCEPT_ALIASES[concept])
+        concept: (
+            any(identifier_hits.get(identifier, False) for identifier in parameter_identifiers)
+            if concept in identifier_concepts
+            else _contains_alias(evidence_text, CONCEPT_ALIASES[concept])
+        )
         for concept in requirement.requested_concepts
     }
     action_hits = {

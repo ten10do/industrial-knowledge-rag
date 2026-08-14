@@ -193,7 +193,7 @@ def test_unsupported_protocol_and_replacement_details_remain_protected():
         "PowerFlex 527 主板电容的预防性更换周期是什么？", _result(document), [document], "vector",
     )
     assert station.decision == "ABSTAIN"
-    assert station.reason == DecisionReason.INSUFFICIENT_EVIDENCE.value
+    assert station.reason == DecisionReason.PROTOCOL_MISMATCH.value
     assert replacement.decision == "ABSTAIN"
     assert replacement.reason == DecisionReason.INSUFFICIENT_EVIDENCE.value
 
