@@ -28,7 +28,9 @@ from backend.evaluation.resumable import (
 )
 from backend.evaluation.v311_resume import completed_results, hash_json, run_query_stage
 from backend.retrieval.evidence import analyze_retrieval_evidence
-from backend.retrieval.evidence_support import skipped_support, validate_evidence_support
+from backend.retrieval.evidence_support import (
+    SUPPORT_RULE_VERSION, skipped_support, validate_evidence_support,
+)
 from backend.retrieval.technical import EVIDENCE_SUPPORT_RULE_VERSION
 
 
@@ -38,6 +40,9 @@ RUNTIME_ROOT = PRIVATE_ROOT / "v312_runtime"
 ARTIFACT_ROOT = PRIVATE_ROOT / "v312_artifacts"
 CORPUS_PATHS = {"a": Path("."), "b": Path("corpus_b")}
 EVALUATION_VERSION = "V3.12"
+REPLAY_RULE_IDENTITY = (
+    f"evidence:{EVIDENCE_SUPPORT_RULE_VERSION}|support:{SUPPORT_RULE_VERSION}"
+)
 SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
@@ -351,7 +356,8 @@ def _replay_store(artifact: dict[str, Any], run_id: str) -> CheckpointStore:
         configuration_hash=hash_json({
             "artifact_hash": artifact["artifact_hash"],
             "artifact_schema_version": artifact["schema_version"],
-            "rule_version": EVIDENCE_SUPPORT_RULE_VERSION,
+            "evidence_rule_version": EVIDENCE_SUPPORT_RULE_VERSION,
+            "support_rule_version": SUPPORT_RULE_VERSION,
         }), started_at=now, updated_at=now,
     )
     return CheckpointStore(RUNTIME_ROOT, identity)
@@ -377,13 +383,13 @@ def replay_artifact(
     started = time.perf_counter()
     stage, resume_stats = run_query_stage(
         store, "REPLAY", artifact["corpus_id"], queries,
-        EVIDENCE_SUPPORT_RULE_VERSION,
+        REPLAY_RULE_IDENTITY,
         lambda row: {
             **replay_query(row, snapshot),
             "artifact_id": artifact["artifact_id"],
             "artifact_hash": artifact["artifact_hash"],
             "evidence_rule_version": EVIDENCE_SUPPORT_RULE_VERSION,
-            "support_rule_version": EVIDENCE_SUPPORT_RULE_VERSION,
+            "support_rule_version": SUPPORT_RULE_VERSION,
             "ground_truth": row["ground_truth"],
             "candidate_ids": {
                 "evidence": [item["chunk_id"] for item in row["evidence_input"]["candidate_pool"]],
@@ -391,12 +397,12 @@ def replay_artifact(
             },
         },
     )
-    rows = completed_results(stage, queries, EVIDENCE_SUPPORT_RULE_VERSION, require_complete=True)
+    rows = completed_results(stage, queries, REPLAY_RULE_IDENTITY, require_complete=True)
     result = {
         "evaluation_version": EVALUATION_VERSION,
-        "rule_version": EVIDENCE_SUPPORT_RULE_VERSION,
+        "rule_version": REPLAY_RULE_IDENTITY,
         "evidence_rule_version": EVIDENCE_SUPPORT_RULE_VERSION,
-        "support_rule_version": EVIDENCE_SUPPORT_RULE_VERSION,
+        "support_rule_version": SUPPORT_RULE_VERSION,
         "artifact_schema_version": artifact["schema_version"],
         "artifact_id": artifact["artifact_id"], "artifact_hash": artifact["artifact_hash"],
         "retrieval_artifact_id": artifact["artifact_id"],
@@ -517,7 +523,7 @@ def combine_replay_results(
     return {
         "evaluation_version": EVALUATION_VERSION,
         "evidence_rule_version": EVIDENCE_SUPPORT_RULE_VERSION,
-        "support_rule_version": EVIDENCE_SUPPORT_RULE_VERSION,
+        "support_rule_version": SUPPORT_RULE_VERSION,
         "corpus_id": "COMBINED", "validity": "VALID",
         "source_artifact_ids": [corpus_a["artifact_id"], corpus_b["artifact_id"]],
         "query_count": len(rows), "metrics": _metrics(rows),

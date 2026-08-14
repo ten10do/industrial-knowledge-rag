@@ -217,7 +217,7 @@ def test_resume_ten_of_thirty_and_materializes_valid_summary(tmp_path: Path, mon
     })]
     run_query_stage(
         store, "REPLAY", "T", artifact["queries"][:10],
-        runner.EVIDENCE_SUPPORT_RULE_VERSION,
+        runner.REPLAY_RULE_IDENTITY,
         lambda row: runner.replay_query(row, snapshot),
     )
     result = runner.replay_artifact(artifact_path, "resume-30", resume=True)

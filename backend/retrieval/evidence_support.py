@@ -23,6 +23,9 @@ from .technical import (
 )
 
 
+SUPPORT_RULE_VERSION = "support-v313.1"
+
+
 class EvidenceIntent(str, Enum):
     FACT = "FACT"
     PARAMETER_VALUE = "PARAMETER_VALUE"
@@ -52,6 +55,7 @@ class SupportReason(str, Enum):
     DETAIL_SUPPORTED = "DETAIL_SUPPORTED"
     MISSING_REQUIRED_CONCEPT = "MISSING_REQUIRED_CONCEPT"
     MISSING_REQUESTED_ACTION = "MISSING_REQUESTED_ACTION"
+    MISSING_REQUESTED_LOCATION = "MISSING_REQUESTED_LOCATION"
     MISSING_PARAMETER_VALUE = "MISSING_PARAMETER_VALUE"
     MISSING_IDENTIFIER_SUPPORT = "MISSING_IDENTIFIER_SUPPORT"
     PARTIAL_EVIDENCE_ONLY = "PARTIAL_EVIDENCE_ONLY"
@@ -88,6 +92,8 @@ CONCEPT_ALIASES = {
         "field-side power", "disconnect power", "remove power",
         "power is removed", "power removed", "power supply",
     ),
+    "firewall": ("firewall", "network firewall"),
+    "tls_cipher": ("tls cipher", "cipher suite", "cipher suites", "cipher restriction"),
 }
 
 ACTION_ALIASES = {
@@ -105,6 +111,8 @@ ACTION_ALIASES = {
         "disconnect.*power", "turn off power", "cut.*power", "cut off power",
         "shut off power", "isolate.*power",
     ),
+    "install": ("install", "installation", "mount", "mounting"),
+    "reinstall": ("reinstall", "re-install"),
 }
 
 ATTRIBUTE_ALIASES = {
@@ -119,10 +127,17 @@ ATTRIBUTE_ALIASES = {
         "required", "grandmaster", "ensure", "so that", "allows", "enables",
     ),
     "resistance": ("阻值", "欧姆", "resistance", "ohm", "ω", "Ω"),
+    "compatibility": ("compatibility", "compatible", "compatible with"),
+    "requirements": (
+        "requirement", "requirements", "required", "mandatory", "must",
+        "prerequisite", "prerequisites", "restriction", "restrictions",
+        "condition", "conditions", "important",
+    ),
+    "version": ("version", "versions", "revision", "revisions", "device model", "devicemodel"),
 }
 
 UNIT_PATTERN = re.compile(
-    r"(?<![a-z0-9])(?:n\s*[·路.]?\s*m|v|a|hz|khz|mhz|s|ms|μs|us|%|°c)(?![a-z0-9])",
+    r"(?<![a-z0-9])(?:n\s*[·路.]?\s*m|v|volt|volts|amp|amps|ampere|amperes|hz|khz|mhz|s|sec|second|seconds|ms|μs|us|%|°c)(?![a-z0-9])",
     re.IGNORECASE,
 )
 VALUE_PATTERN = re.compile(r"(?<![a-z0-9])[-+]?\d+(?:\.\d+)?\s*(?:%|[a-zμ°]+)?", re.IGNORECASE)
@@ -143,6 +158,7 @@ class EvidenceRequirement:
     requested_value: str = ""
     requested_unit: str = ""
     requested_protocol: tuple[str, ...] = ()
+    requested_location: bool = False
     specificity: str = EvidenceSpecificity.GENERAL.value
 
     def as_dict(self) -> dict:
@@ -214,7 +230,7 @@ def _intent(query: str, identifiers: tuple[str, ...]) -> EvidenceIntent:
         return EvidenceIntent.SAFETY_REQUIREMENT
     if re.search(r"维护|维修|保养|更换|maintenance|service|replace", query, re.IGNORECASE):
         return EvidenceIntent.MAINTENANCE
-    if re.search(r"如何|怎样|步骤|怎么|procedure|configure|set up|commission", query, re.IGNORECASE):
+    if re.search(r"如何|怎样|步骤|怎么|\bhow\b|procedure|configure|set up|commission|reinstall", query, re.IGNORECASE):
         return EvidenceIntent.PROCEDURE
     if re.search(r"多少|数值|值|阈值|精度|电压|电流|扭矩|频率|多久|value|threshold|accuracy", query, re.IGNORECASE):
         return EvidenceIntent.PARAMETER_VALUE
@@ -253,6 +269,12 @@ def build_evidence_requirement(
     concepts = _matched_groups(normalized, CONCEPT_ALIASES)
     attributes = _matched_groups(normalized, ATTRIBUTE_ALIASES)
     actions = _matched_groups(normalized, ACTION_ALIASES)
+    requested_location = bool(re.search(
+        r"\bwhere\b|\bwhich\s+(?:section|chapter|appendix)\b|"
+        r"\bon\s+what\s+page\b|\bwhere\s+in\s+the\s+manual\b",
+        normalized,
+        re.IGNORECASE,
+    ))
     unit_match = UNIT_PATTERN.search(normalized)
     requested_unit = _normalize(unit_match.group(0)) if unit_match else ""
     value_match = REQUESTED_VALUE_PATTERN.search(normalized)
@@ -263,7 +285,7 @@ def build_evidence_requirement(
         or analysis.product_family or analysis.product_identities
     )
     specificity = EvidenceSpecificity.GENERAL
-    if protocols or identifiers or requested_unit or len(concepts) >= 2:
+    if protocols or identifiers or requested_unit or requested_location or len(concepts) >= 2:
         specificity = EvidenceSpecificity.HIGHLY_SPECIFIC
     elif has_identity or concepts or attributes or actions:
         specificity = EvidenceSpecificity.SPECIFIC
@@ -277,6 +299,7 @@ def build_evidence_requirement(
         requested_value=requested_value,
         requested_unit=requested_unit,
         requested_protocol=protocols,
+        requested_location=requested_location,
         specificity=specificity.value,
     )
 
@@ -292,6 +315,43 @@ def _query_identities(analysis: QueryAnalysis) -> tuple[ProductIdentity, ...]:
         aliases=((analysis.equipment_model,) if analysis.equipment_model else ()),
     )
     return (identity,) if any((identity.product_family, identity.product_series, identity.equipment_model)) else ()
+
+
+def _unit_supported(requested_unit: str, evidence_text: str) -> bool:
+    if not requested_unit:
+        return True
+    aliases = {
+        "v": ("v", "volt", "volts"),
+        "volt": ("v", "volt", "volts"),
+        "volts": ("v", "volt", "volts"),
+        "amp": ("a", "amp", "amps", "ampere", "amperes"),
+        "amps": ("a", "amp", "amps", "ampere", "amperes"),
+        "ampere": ("a", "amp", "amps", "ampere", "amperes"),
+        "amperes": ("a", "amp", "amps", "ampere", "amperes"),
+        "s": ("s", "sec", "second", "seconds"),
+        "sec": ("s", "sec", "second", "seconds"),
+        "second": ("s", "sec", "second", "seconds"),
+        "seconds": ("s", "sec", "second", "seconds"),
+    }
+    normalized_unit = _normalize(requested_unit)
+    return any(
+        re.search(
+            rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])",
+            evidence_text,
+            re.IGNORECASE,
+        )
+        for alias in aliases.get(normalized_unit, (normalized_unit,))
+    )
+
+
+def _location_supported(candidates: list) -> bool:
+    for candidate in candidates:
+        metadata = candidate.metadata or {}
+        if any(str(metadata.get(key, "")).strip() for key in ("section", "subsection")):
+            return True
+        if metadata.get("page") is not None or metadata.get("page_number") is not None:
+            return True
+    return False
 
 
 def validate_evidence_support(query: str, result, documents: list | None = None) -> EvidenceSupport:
@@ -344,9 +404,8 @@ def validate_evidence_support(query: str, result, documents: list | None = None)
         attribute: _contains_alias(evidence_text, ATTRIBUTE_ALIASES[attribute])
         for attribute in requirement.requested_attributes
     }
-    unit_supported = not requirement.requested_unit or bool(
-        re.search(re.escape(requirement.requested_unit), evidence_text, re.IGNORECASE)
-    )
+    unit_supported = _unit_supported(requirement.requested_unit, evidence_text)
+    location_supported = not requirement.requested_location or _location_supported(candidates)
     value_supported = not requirement.requested_value or requirement.requested_value.casefold() in evidence_text
     parameter_value_supported = bool(VALUE_PATTERN.search(evidence_text))
 
@@ -367,6 +426,8 @@ def validate_evidence_support(query: str, result, documents: list | None = None)
     missing.extend(f"attribute:{name}" for name, supported in attribute_hits.items() if not supported)
     if not unit_supported:
         missing.append(f"unit:{requirement.requested_unit}")
+    if not location_supported:
+        missing.append("location")
     if not value_supported:
         missing.append(f"value:{requirement.requested_value}")
 
@@ -382,6 +443,7 @@ def validate_evidence_support(query: str, result, documents: list | None = None)
         "requested_actions": action_hits,
         "requested_attributes": attribute_hits,
         "requested_unit": unit_supported,
+        "requested_location": location_supported,
         "requested_value": value_supported,
         "parameter_value": parameter_value_supported,
         "candidate_count": len(candidates),
@@ -409,12 +471,14 @@ def validate_evidence_support(query: str, result, documents: list | None = None)
         status, reason = SupportStatus.INSUFFICIENT, SupportReason.MISSING_REQUIRED_CONCEPT
     elif any(item.startswith("action:") for item in missing):
         status, reason = SupportStatus.INSUFFICIENT, SupportReason.MISSING_REQUESTED_ACTION
+    elif "location" in missing:
+        status, reason = SupportStatus.INSUFFICIENT, SupportReason.MISSING_REQUESTED_LOCATION
     elif any(item.startswith(("attribute:", "unit:", "value:")) for item in missing) or "parameter_value" in missing:
         status, reason = SupportStatus.INSUFFICIENT, SupportReason.MISSING_PARAMETER_VALUE
     elif not any((identities, requirement.identifiers, requirement.requested_protocol,
                   requirement.requested_concepts, requirement.requested_attributes,
                   requirement.requested_action, requirement.requested_unit,
-                  requirement.requested_value)):
+                  requirement.requested_value, requirement.requested_location)):
         status, reason = SupportStatus.UNKNOWN, SupportReason.NO_EXTRACTABLE_REQUIREMENT
     elif missing:
         status, reason = SupportStatus.INSUFFICIENT, SupportReason.PARTIAL_EVIDENCE_ONLY
