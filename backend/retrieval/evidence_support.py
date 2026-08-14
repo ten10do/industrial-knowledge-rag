@@ -23,7 +23,7 @@ from .technical import (
 )
 
 
-SUPPORT_RULE_VERSION = "support-v315.1"
+SUPPORT_RULE_VERSION = "support-v316.1"
 
 
 class EvidenceIntent(str, Enum):
@@ -99,10 +99,14 @@ CONCEPT_ALIASES = {
     ),
     "firewall": ("firewall", "network firewall"),
     "tls_cipher": ("tls cipher", "cipher suite", "cipher suites", "cipher restriction"),
-    "subnet_mask": ("subnet mask", "network mask"),
+    "subnet_mask": ("subnet mask", "network mask", "子网掩码", "网络掩码"),
     "temperature_sensor": ("temperature sensor", "thermal sensor"),
     "megger_test": ("megger test", "insulation resistance measurement"),
     "dip_switch": ("dip switch", "dip-switch"),
+    "configuration_data_required": (
+        r"configuration.*data values", r"cannot.*without configuration",
+        r"requires?.*configuration data",
+    ),
 }
 
 ACTION_ALIASES = {
@@ -133,7 +137,7 @@ ATTRIBUTE_ALIASES = {
     "quantity": ("多少个", "最大数量", "最多", "maximum", "max."),
     "status": ("什么状态", "状态", "status", "state", "fault status"),
     "cause": (
-        "为什么", "原因", "cause", "reason", "because",
+        "为什么", "原因", "why", "cause", "reason", "because",
     ),
     "resistance": ("阻值", "欧姆", "resistance", "ohm", "ω", "Ω"),
     "compatibility": ("compatibility", "compatible", "compatible with"),
@@ -145,6 +149,7 @@ ATTRIBUTE_ALIASES = {
     "default_value": ("default value", "by default", "default"),
     "range": ("supported range", "permitted range", "acceptable range", "range"),
     "rated_value": ("rated value", "rated voltage", "rated current", "rated"),
+    "motor_voltage": ("motor voltage", "servomotor voltage", "motor winding voltage", "servomotor winding voltage"),
     "temperature": ("ambient temperature", "temperature"),
     "cable_length": ("cable length", "segment length", "transmission distance"),
     "data_size": ("data size", "data sizes", "input and output data", "process data size"),
@@ -155,6 +160,7 @@ ATTRIBUTE_ALIASES = {
     "torque": ("torque", "tightening torque"),
     "manufacturer": ("manufacturer", "vendor", "maker"),
     "timer_values": ("timer values", "timer number", "completion flag", "present value"),
+    "task_period": ("task period", "task cycle", "cycle time", "task timing"),
 }
 
 ATTRIBUTE_EVIDENCE_ALIASES = {
@@ -165,10 +171,12 @@ ATTRIBUTE_EVIDENCE_ALIASES = {
     "requirements": (*ATTRIBUTE_ALIASES["requirements"], "required", "mandatory", "must", "before", "only if"),
     "default_value": (*ATTRIBUTE_ALIASES["default_value"], "initial", "factory default"),
     "range": (*ATTRIBUTE_ALIASES["range"], "variation", "from", " to ", "...", "…"),
-    "rated_value": (*ATTRIBUTE_ALIASES["rated_value"], "nominal"),
+    "rated_value": ATTRIBUTE_ALIASES["rated_value"],
+    "motor_voltage": (*ATTRIBUTE_ALIASES["motor_voltage"], "motor rated voltage", "motor nominal voltage"),
     "cable_length": (*ATTRIBUTE_ALIASES["cable_length"], "电缆长度", "最长"),
     "data_size": (*ATTRIBUTE_ALIASES["data_size"], "input data", "output data", "kbyte", "byte", "数据量", "输入数据", "输出数据"),
     "switch_position": (*ATTRIBUTE_ALIASES["switch_position"], "position"),
+    "task_period": (*ATTRIBUTE_ALIASES["task_period"], "任务周期", "任务时间"),
 }
 
 VALUE_KIND_PATTERNS = {
@@ -176,7 +184,9 @@ VALUE_KIND_PATTERNS = {
     "range": re.compile(r"\brange\b|permitted|acceptable variation", re.IGNORECASE),
     "maximum": re.compile(r"\bmaximum\b|\bmax\.?\b", re.IGNORECASE),
     "minimum": re.compile(r"\bminimum\b|\bmin\.?\b", re.IGNORECASE),
-    "rated": re.compile(r"\brated\b|\bnominal\b", re.IGNORECASE),
+    "rated": re.compile(r"\brated\b", re.IGNORECASE),
+    "nominal": re.compile(r"\bnominal\b", re.IGNORECASE),
+    "recommended": re.compile(r"\brecommended\b|\badvised\b", re.IGNORECASE),
     "duration": re.compile(r"\bhow long\b|waiting time|wait time", re.IGNORECASE),
     "exact": re.compile(r"\b(?:what|which)\b.{0,80}\b(?:value|limit|length|size|voltage|temperature|torque|address)\b", re.IGNORECASE),
 }
@@ -285,7 +295,16 @@ def _matched_groups(text: str, groups: dict[str, tuple[str, ...]]) -> tuple[str,
 
 def _requested_value_kinds(query: str) -> tuple[str, ...]:
     normalized = _normalize(query)
-    return tuple(name for name, pattern in VALUE_KIND_PATTERNS.items() if pattern.search(normalized))
+    kinds = [name for name, pattern in VALUE_KIND_PATTERNS.items() if pattern.search(normalized)]
+    location_cue = re.search(
+        r"\b(?:where|at\s+which|which\s+(?:parts?|points?|terminals?|locations?))\b|"
+        r"\bwhat\s+(?:physical\s+)?(?:points?|terminals?|locations?)\b|"
+        r"在哪|哪些端子|哪些位置|何处",
+        normalized, re.IGNORECASE,
+    )
+    if location_cue and not re.search(r"\b(?:value|limit|range|maximum|minimum|rated|nominal|default)\b", normalized, re.IGNORECASE):
+        kinds = [name for name in kinds if name != "exact"]
+    return tuple(kinds)
 
 
 def _requested_requirement_type(query: str) -> str:
@@ -477,7 +496,9 @@ def _value_kind_supported(kind: str, text: str) -> bool:
         "range": r"\brange\b|variation|\d(?:\.\d+)?\s*(?:…|\.\.\.|to)\s*\d|范围|变化范围",
         "maximum": r"\bmaximum\b|\bmax\.?\b|at most|no more than|or fewer|最大|最长",
         "minimum": r"\bminimum\b|\bmin\.?\b|at least|or later|以上|最小",
-        "rated": r"\brated\b|\bnominal\b|额定",
+        "rated": r"\brated\b|额定",
+        "nominal": r"\bnominal\b|标称",
+        "recommended": r"\brecommended\b|\badvised\b|建议|推荐",
         "duration": r"\d+(?:\.\d+)?\s*(?:ms|s|sec|seconds?|minutes?|mins?|hours?|hrs?)\b",
         "exact": r"",
     }
@@ -494,12 +515,44 @@ def _value_kind_supported(kind: str, text: str) -> bool:
 
 
 def _attribute_supported(attribute: str, text: str) -> bool:
+    if attribute == "cause":
+        return bool(re.search(
+            r"\b(?:because|therefore|thus|hence|so that|in order to|to prevent|to ensure|"
+            r"enables?|allows?|avoids?)\b|"
+            r"\bwithout\b.{0,100}\b(?:cannot|can't|won't|unable)\b|"
+            r"\bif\b.{0,120}\b(?:may|can|will)\b.{0,50}\b(?:result|cause|lead)\b|"
+            r"\bverif(?:y|ies|ied)\b.{0,60}\b(?:integrity|validity|correctness|safety)\b|"
+            r"因为|因此|从而|以便|为了|否则|导致|确保|防止|避免",
+            text, re.IGNORECASE,
+        ))
+    if attribute == "subnet_mask" and re.search(
+        r"\b(?:no|without)\s+(?:default\s+)?subnet mask\b|未(?:指定|提供).{0,12}子网掩码",
+        text, re.IGNORECASE,
+    ):
+        return False
     value_kind = {
         "default_value": "default", "range": "range", "rated_value": "rated",
     }.get(attribute)
     if value_kind and _value_kind_supported(value_kind, text):
         return True
     return _contains_alias(text, ATTRIBUTE_EVIDENCE_ALIASES[attribute])
+
+
+def _concept_supported(concept: str, text: str) -> bool:
+    if concept == "configuration_data_required":
+        if re.search(
+            r"(?:without|no|zero)\s+configuration|requires?\s+no\s+configuration|"
+            r"only\s+supports?.{0,40}(?:without|no)\s+configuration|"
+            r"无需配置|无须配置|不需要配置",
+            text, re.IGNORECASE,
+        ):
+            return False
+        return bool(re.search(
+            r"requires?.{0,40}configuration data|configuration.?data.{0,40}(?:value|instance|size)|"
+            r"配置数据.{0,30}(?:值|实例|大小)",
+            text, re.IGNORECASE,
+        ))
+    return _contains_alias(text, CONCEPT_ALIASES[concept])
 
 
 def _qualifier_supported(qualifier: str, text: str) -> bool:
@@ -601,46 +654,85 @@ def _identifier_attribute_associated(
     return False
 
 
+def _text_supports_local_value(requirement: EvidenceRequirement, text: str) -> bool:
+    if requirement.identifiers and not all(
+        contains_parameter_identifier(text, identifier) for identifier in requirement.identifiers
+    ):
+        return False
+    if requirement.requested_qualifiers and not all(
+        _qualifier_supported(item, text) for item in requirement.requested_qualifiers
+    ):
+        return False
+    if requirement.requested_protocol and not all(
+        _contains_alias(text, PROTOCOL_ALIASES[item]) for item in requirement.requested_protocol
+    ):
+        return False
+    if requirement.requested_concepts and not all(
+        _concept_supported(item, text) for item in requirement.requested_concepts
+    ):
+        return False
+    if not all(_attribute_supported(item, text) for item in requirement.requested_attributes):
+        return False
+    if not _identifier_attribute_associated(requirement, text):
+        return False
+    if requirement.requested_value and requirement.requested_value.casefold() not in text:
+        return False
+    if requirement.requested_unit and not _unit_supported(requirement.requested_unit, text):
+        return False
+    if not all(_value_kind_supported(kind, text) for kind in requirement.requested_value_kind):
+        return False
+    if not _implicit_unit_supported(requirement, text):
+        return False
+    return True
+
+
+def _scope_group_key(candidate) -> tuple[str, ...] | None:
+    metadata = candidate.metadata or {}
+    document_id = _normalize(metadata.get("document_id", ""))
+    scope = _normalize(metadata.get("subsection") or metadata.get("section") or "")
+    if not document_id or not scope:
+        return None
+    return (
+        document_id,
+        _normalize(metadata.get("manufacturer", "")),
+        _normalize(metadata.get("equipment_model", "")),
+        scope,
+    )
+
+
 def _local_value_supported(requirement: EvidenceRequirement, candidates: list) -> bool:
     needs_value = bool(
-        requirement.requested_value or requirement.requested_value_kind
-        or EvidenceIntent(requirement.intent) == EvidenceIntent.PARAMETER_VALUE
+        requirement.requested_value or requirement.requested_value_kind or requirement.requested_unit
     )
     if not needs_value and not requirement.requested_unit:
         return True
     for candidate in candidates:
         text = _normalize(candidate.document.page_content)
+        if _text_supports_local_value(requirement, text):
+            return True
+
+    groups: dict[tuple[str, ...], list] = {}
+    for candidate in candidates:
+        key = _scope_group_key(candidate)
+        if key is not None:
+            groups.setdefault(key, []).append(candidate)
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        pages = [
+            int(candidate.metadata.get("page")) for candidate in group
+            if str(candidate.metadata.get("page", "")).isdigit()
+        ]
+        if pages and max(pages) - min(pages) > 2:
+            continue
+        texts = [_normalize(candidate.document.page_content) for candidate in group]
         if requirement.identifiers and not all(
-            contains_parameter_identifier(text, identifier) for identifier in requirement.identifiers
+            all(contains_parameter_identifier(text, identifier) for identifier in requirement.identifiers)
+            for text in texts
         ):
             continue
-        if requirement.requested_qualifiers and not all(
-            _qualifier_supported(item, text) for item in requirement.requested_qualifiers
-        ):
-            continue
-        if requirement.requested_protocol and not all(
-            _contains_alias(text, PROTOCOL_ALIASES[item]) for item in requirement.requested_protocol
-        ):
-            continue
-        if requirement.requested_concepts and not all(
-            _contains_alias(text, CONCEPT_ALIASES[item]) for item in requirement.requested_concepts
-        ):
-            continue
-        if not all(_attribute_supported(item, text) for item in requirement.requested_attributes):
-            continue
-        if not _identifier_attribute_associated(requirement, text):
-            continue
-        if requirement.requested_value and requirement.requested_value.casefold() not in text:
-            continue
-        if requirement.requested_unit and not _unit_supported(requirement.requested_unit, text):
-            continue
-        if not all(_value_kind_supported(kind, text) for kind in requirement.requested_value_kind):
-            continue
-        if not _implicit_unit_supported(requirement, text):
-            continue
-        if EvidenceIntent(requirement.intent) == EvidenceIntent.PARAMETER_VALUE and not VALUE_PATTERN.search(text):
-            continue
-        return True
+        if _text_supports_local_value(requirement, "\n".join(texts)):
+            return True
     return False
 
 
@@ -683,7 +775,7 @@ def validate_evidence_support(query: str, result, documents: list | None = None)
         concept: (
             any(identifier_hits.get(identifier, False) for identifier in parameter_identifiers)
             if concept in identifier_concepts
-            else _contains_alias(evidence_text, CONCEPT_ALIASES[concept])
+            else _concept_supported(concept, evidence_text)
         )
         for concept in requirement.requested_concepts
     }
@@ -772,7 +864,7 @@ def validate_evidence_support(query: str, result, documents: list | None = None)
             ),
             any(_normalize(identifier) in _normalize(candidate.document.page_content) for identifier in requirement.identifiers),
             any(_contains_alias(_normalize(candidate.document.page_content), PROTOCOL_ALIASES[name]) for name in requirement.requested_protocol),
-            any(_contains_alias(_normalize(candidate.document.page_content), CONCEPT_ALIASES[name]) for name in requirement.requested_concepts),
+            any(_concept_supported(name, _normalize(candidate.document.page_content)) for name in requirement.requested_concepts),
         ))
     )
 
