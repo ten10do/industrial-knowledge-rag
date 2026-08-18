@@ -198,7 +198,7 @@ def test_unsupported_protocol_and_replacement_details_remain_protected():
     assert replacement.reason == DecisionReason.MISSING_ACTION_EVIDENCE.value
 
 
-def test_unique_bare_model_can_claim_exact_model_support():
+def test_unique_bare_model_does_not_bypass_incomplete_action_support():
     document = _document(equipment_model="CompactLogix 5380", content="Duplicate IP recovery guidance.")
     evidence = analyze_retrieval_evidence(
         "两台 5380 地址冲突后怎样恢复？",
@@ -207,8 +207,8 @@ def test_unique_bare_model_can_claim_exact_model_support():
         "hybrid",
     )
     assert evidence.identity_relation == IdentityRelation.EXACT_MODEL.value
-    assert evidence.decision == "ANSWER"
-    assert evidence.reason == DecisionReason.EXACT_MODEL_EVIDENCE.value
+    assert evidence.decision == "ABSTAIN"
+    assert evidence.reason == DecisionReason.MISSING_ACTION_EVIDENCE.value
 
 
 def test_multi_identity_query_accepts_evidence_from_either_requested_model():

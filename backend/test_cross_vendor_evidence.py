@@ -96,7 +96,11 @@ def test_cross_equipment_abstains_when_query_references_foreign_vendor():
 
 
 def test_cross_equipment_does_not_trigger_for_in_corpus_vendor():
-    document = _doc("pf520", "PowerFlex 520 configures a static IP.", model="PowerFlex 520-series (523/525)")
+    document = _doc(
+        "pf520",
+        "Set a static IP on the PowerFlex 520 by selecting the network configuration fields.",
+        model="PowerFlex 520-series (523/525)",
+    )
     evidence = analyze_retrieval_evidence(
         "How do I configure a static IP on a PowerFlex 520?", _result("q", [document]), [document], "hybrid",
     )
@@ -209,7 +213,7 @@ def test_hard_negative_related_topic_but_unsupported_detail():
     document = _doc("p", "The FPNO-21 supports PROFINET station naming.", model="FPNO-21", manufacturer="ABB", family="FPNO")
     evidence = analyze_retrieval_evidence(query, _result(query, [document]), [document], "hybrid")
     assert evidence.decision == "ABSTAIN"
-    assert evidence.reason == DecisionReason.INSUFFICIENT_EVIDENCE.value
+    assert evidence.reason == DecisionReason.PROTOCOL_MISMATCH.value
 
 
 def test_partial_support_is_rejected_not_accepted():

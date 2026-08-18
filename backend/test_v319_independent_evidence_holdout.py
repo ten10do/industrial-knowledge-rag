@@ -38,7 +38,13 @@ def _manifest():
     return manifest
 
 
-def test_manifest_freeze_distribution_and_coverage_are_enforced():
+def test_manifest_freeze_distribution_and_coverage_are_enforced(monkeypatch):
+    # This is a historical V3.19 manifest contract. Validate it against the
+    # rule identity it froze, independently of the current production rule.
+    monkeypatch.setattr(
+        "backend.evaluation.v319_independent_evidence_holdout.EVIDENCE_SUPPORT_RULE_VERSION",
+        "evidence-v318.1",
+    )
     manifest = _manifest()
     distribution = validate_holdout_manifest(manifest)
     assert distribution["answerable"] == 22

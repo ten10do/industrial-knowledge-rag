@@ -8,18 +8,7 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 
 from .filters import QueryAnalysis, analyze_query
-from .evidence_support import (
-    ACTION_ALIASES,
-    EvidenceIntent,
-    _attribute_supported,
-    _concept_supported,
-    _contains_alias,
-    _local_value_supported,
-    _requirement_type_supported,
-    _unit_supported,
-    _value_kind_supported,
-    build_evidence_requirement,
-)
+from .evidence_contract import evaluate_evidence_contract
 from .product_identity import (
     IdentityRelation,
     ProductIdentity,
@@ -29,12 +18,9 @@ from .product_identity import (
     identity_relation,
 )
 from .technical import (
-    PROTOCOL_ALIASES,
     contains_parameter_identifier,
-    contains_term,
     extract_parameter_references,
     foreign_equipment_signal,
-    matched_terms,
     normalize_technical_text,
 )
 
@@ -84,6 +70,7 @@ class DecisionReason(str, Enum):
     MISSING_REQUIREMENT_EVIDENCE = "MISSING_REQUIREMENT_EVIDENCE"
     MISSING_ACTION_EVIDENCE = "MISSING_ACTION_EVIDENCE"
     PARTIAL_EVIDENCE_ONLY = "PARTIAL_EVIDENCE_ONLY"
+    CONTRACT_REQUIREMENTS_COVERED = "CONTRACT_REQUIREMENTS_COVERED"
 
 
 @dataclass(frozen=True)
@@ -112,6 +99,7 @@ class RetrievalEvidence:
     query_identity: dict = field(default_factory=dict)
     candidate_identity: dict = field(default_factory=dict)
     identity_relation: str = IdentityRelation.UNKNOWN.value
+    contract: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -223,147 +211,6 @@ def _candidate_text(candidates: list) -> str:
     )
 
 
-_COMPONENT_IDENTIFIER_PATTERNS = (
-    re.compile(
-        r"(?<![a-z0-9])(?P<identifier>[a-z]{1,4}\d{1,4})(?=\s+(?:connector|port|terminal))",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"(?:connector|port|terminal)\s+(?P<identifier>[a-z]{1,4}\d{1,4})(?![a-z0-9])",
-        re.IGNORECASE,
-    ),
-)
-_EVIDENCE_PROTOCOL_ALIASES = {
-    **PROTOCOL_ALIASES,
-    "bacnet": ("bacnet", "bacnet ms/tp", "bacnet mstp"),
-    "controlnet": ("controlnet",),
-    "5g": ("5g", "5g modem", "5g cellular"),
-}
-
-
-def _component_identifiers(query: str) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(
-        match.group("identifier").upper()
-        for pattern in _COMPONENT_IDENTIFIER_PATTERNS
-        for match in pattern.finditer(query or "")
-    ))
-
-
-def _identifier_in_current_evidence(identifier: str, candidates: list) -> bool:
-    """Require the requested identifier in the current evidence, not merely a
-    product-wide index or a cross-reference such as ``Related Parameters``."""
-    pattern = re.compile(
-        rf"(?<![a-z0-9.]){re.escape(identifier)}(?![a-z0-9.])",
-        re.IGNORECASE,
-    )
-    found = False
-    for candidate in candidates:
-        text = str(getattr(candidate.document, "page_content", "") or "")
-        spans = [match.span() for match in pattern.finditer(text)]
-        if not spans:
-            continue
-        found = True
-        for start, _ in spans:
-            prefix = text[max(0, start - 80):start]
-            if not re.search(r"related\s+parameters?\s*:[^\n]{0,60}$", prefix, re.IGNORECASE):
-                return True
-    return False if found else False
-
-
-def _requested_protocols(query: str, requirement) -> tuple[str, ...]:
-    normalized = normalize_technical_text(query)
-    explicit = [
-        name for name, aliases in _EVIDENCE_PROTOCOL_ALIASES.items()
-        if _contains_alias(normalized, aliases)
-    ]
-    return tuple(dict.fromkeys((*requirement.requested_protocol, *explicit)))
-
-
-def _requirement_preflight(
-    query: str, candidates: list, documents: list, analysis: QueryAnalysis,
-) -> tuple[DecisionReason | None, bool]:
-    """Reject only obvious requirement gaps before retrieval strength is used.
-
-    This is intentionally coarser than the Support gate: it checks presence and
-    scope, while final sufficiency and local aggregation remain Support's job.
-    """
-    requirement = build_evidence_requirement(query, documents, analysis)
-    text = normalize_technical_text(_candidate_text(candidates))
-    parameter_identifiers = tuple(
-        reference.identifier for reference in extract_parameter_references(query)
-    )
-    identifiers = tuple(dict.fromkeys((*requirement.identifiers, *_component_identifiers(query))))
-    has_concrete_requirement = bool(
-        identifiers
-        or requirement.requested_protocol
-        or requirement.requested_concepts
-        or requirement.requested_attributes
-        or requirement.requested_action
-        or requirement.requested_value
-        or requirement.requested_unit
-        or requirement.requested_value_kind
-        or requirement.requested_requirement_type != "general"
-    )
-
-    for identifier in identifiers:
-        if identifier in parameter_identifiers:
-            supported = _identifier_in_current_evidence(identifier, candidates)
-        else:
-            supported = _identifier_in_current_evidence(identifier, candidates)
-        if not supported:
-            return DecisionReason.IDENTIFIER_NOT_IN_EVIDENCE, has_concrete_requirement
-
-    for protocol in _requested_protocols(query, requirement):
-        if not _contains_alias(text, _EVIDENCE_PROTOCOL_ALIASES[protocol]):
-            return DecisionReason.PROTOCOL_MISMATCH, has_concrete_requirement
-
-    if any(not _concept_supported(name, text) for name in requirement.requested_concepts):
-        return DecisionReason.PARTIAL_EVIDENCE_ONLY, has_concrete_requirement
-    attributes = tuple(
-        name for name in requirement.requested_attributes
-        if name != "requirements" or requirement.requested_requirement_type != "general"
-    )
-    if any(not _attribute_supported(name, text) for name in attributes):
-        return DecisionReason.MISSING_ATTRIBUTE_EVIDENCE, has_concrete_requirement
-    action_required = EvidenceIntent(requirement.intent) in {
-        EvidenceIntent.PROCEDURE,
-        EvidenceIntent.FAULT_ACTION,
-        EvidenceIntent.SAFETY_REQUIREMENT,
-        EvidenceIntent.MAINTENANCE,
-    }
-    if action_required and any(
-        not _contains_alias(text, ACTION_ALIASES[name])
-        for name in requirement.requested_action
-    ):
-        return DecisionReason.MISSING_ACTION_EVIDENCE, has_concrete_requirement
-    if requirement.requested_unit and not _unit_supported(requirement.requested_unit, text):
-        return DecisionReason.MISSING_VALUE_EVIDENCE, has_concrete_requirement
-    if requirement.requested_value and requirement.requested_value.casefold() not in text:
-        return DecisionReason.MISSING_VALUE_EVIDENCE, has_concrete_requirement
-    if any(not _value_kind_supported(kind, text) for kind in requirement.requested_value_kind):
-        return DecisionReason.MISSING_VALUE_EVIDENCE, has_concrete_requirement
-    if requirement.requested_value_kind and not _local_value_supported(requirement, candidates):
-        return DecisionReason.MISSING_VALUE_EVIDENCE, has_concrete_requirement
-    if (
-        requirement.requested_requirement_type in {"compatibility", "prerequisite", "version"}
-        and not _requirement_type_supported(requirement, text)
-    ):
-        return DecisionReason.MISSING_REQUIREMENT_EVIDENCE, has_concrete_requirement
-    return None, has_concrete_requirement
-
-
-def _unsupported_protocol(query: str, candidates: list) -> str | None:
-    """Return a requested protocol absent from the scoped evidence, if any."""
-    requested = matched_terms(normalize_technical_text(query), PROTOCOL_ALIASES)
-    if not requested:
-        return None
-    evidence = normalize_technical_text(_candidate_text(candidates))
-    for protocol in requested:
-        if not contains_term(evidence, PROTOCOL_ALIASES[protocol]):
-            return protocol
-    return None
-
-
 def _unknown_parameter(
     query: str,
     candidates: list,
@@ -448,13 +295,18 @@ def analyze_retrieval_evidence(
         aliases=((analysis.equipment_model,) if analysis.equipment_model else ()),
     )
     candidate_identity = identity_from_metadata(top_metadata)
+    candidate_identities = [identity_from_metadata(candidate.metadata) for candidate in candidates]
     query_identities = analysis.product_identities or (query_identity,)
     has_query_identity = any(
         identity.product_family or identity.product_series or identity.equipment_model
         for identity in query_identities
     )
     if identity_matching:
-        relations = {identity_relation(identity, candidate_identity) for identity in query_identities}
+        relations = {
+            identity_relation(identity, candidate_item)
+            for identity in query_identities
+            for candidate_item in candidate_identities
+        }
         relation = next(
             (
                 value for value in (
@@ -468,7 +320,9 @@ def analyze_retrieval_evidence(
             IdentityRelation.UNKNOWN,
         )
         compatible_identity = any(
-            identity_is_compatible(identity, candidate_identity) for identity in query_identities
+            identity_is_compatible(identity, candidate_item)
+            for identity in query_identities
+            for candidate_item in candidate_identities
         )
         corpus_identities = identities_from_documents(documents)
         known_identity = all(
@@ -491,14 +345,15 @@ def analyze_retrieval_evidence(
         known_identity = analysis.equipment_model.casefold() in models if analysis.equipment_model else True
     exact_identifier = bool(
         analysis.error_code
-        and (
-            str(top_metadata.get("error_code", "")).casefold() == analysis.error_code.casefold()
+        and any(
+            str(candidate.metadata.get("error_code", "")).casefold() == analysis.error_code.casefold()
             or analysis.error_code.casefold() in {
                 match.group(0).casefold()
                 for match in EVIDENCE_IDENTIFIER_PATTERN.finditer(
-                    str(getattr(top.document, "page_content", "") or "") if top else ""
+                    str(getattr(candidate.document, "page_content", "") or "")
                 )
             }
+            for candidate in candidates
         )
     )
     exact_model = relation == IdentityRelation.EXACT_MODEL
@@ -516,11 +371,19 @@ def analyze_retrieval_evidence(
 
     unsupported_detail = _detail_request_lacks_support(query, candidates)
     foreign_equipment = foreign_equipment_signal(query, documents)
-    protocol_mismatch = _unsupported_protocol(query, candidates)
     unknown_parameter = _unknown_parameter(query, candidates, documents, analysis)
-    requirement_gap, has_concrete_requirement = _requirement_preflight(
-        query, candidates, documents, analysis,
-    )
+    contract = evaluate_evidence_contract(query, candidates, documents, analysis)
+    contract_reason_map = {
+        "IDENTIFIER": DecisionReason.IDENTIFIER_NOT_IN_EVIDENCE,
+        "PROTOCOL": DecisionReason.PROTOCOL_MISMATCH,
+        "ATTRIBUTE": DecisionReason.MISSING_ATTRIBUTE_EVIDENCE,
+        "ACTION": DecisionReason.MISSING_ACTION_EVIDENCE,
+        "VALUE": DecisionReason.MISSING_VALUE_EVIDENCE,
+        "UNIT": DecisionReason.MISSING_VALUE_EVIDENCE,
+        "VALUE_KIND": DecisionReason.MISSING_VALUE_EVIDENCE,
+        "POLARITY": DecisionReason.MISSING_VALUE_EVIDENCE,
+        "REQUIREMENT_TYPE": DecisionReason.MISSING_REQUIREMENT_EVIDENCE,
+    }
     if analysis.error_code and analysis.error_code.lower() not in identifiers:
         decision, reason = Decision.ABSTAIN, DecisionReason.UNKNOWN_IDENTIFIER
     elif has_query_identity and not known_identity:
@@ -533,24 +396,28 @@ def analyze_retrieval_evidence(
         decision, reason = Decision.ABSTAIN, DecisionReason.UNKNOWN_IDENTIFIER
     elif foreign_equipment is not None:
         decision, reason = Decision.ABSTAIN, DecisionReason.CROSS_EQUIPMENT
-    elif protocol_mismatch is not None:
-        decision, reason = Decision.ABSTAIN, DecisionReason.PROTOCOL_MISMATCH
     elif unknown_parameter is not None:
         decision, reason = Decision.ABSTAIN, DecisionReason.UNKNOWN_PARAMETER
     elif _security_bypass_signal(query):
         decision, reason = Decision.ABSTAIN, DecisionReason.UNSUPPORTED_PROCEDURE
-    elif requirement_gap is not None:
-        decision, reason = Decision.ABSTAIN, requirement_gap
+    elif contract.has_critical_requirements and not contract.sufficient:
+        missing_kind = contract.missing[0].split(":", 1)[0].upper() if contract.missing else ""
+        decision = Decision.ABSTAIN
+        reason = contract_reason_map.get(missing_kind, DecisionReason.PARTIAL_EVIDENCE_ONLY)
     elif unsupported_detail:
         decision, reason = Decision.ABSTAIN, DecisionReason.INSUFFICIENT_EVIDENCE
+    elif contract.has_critical_requirements:
+        decision = Decision.ANSWER
+        if exact_identifier:
+            reason = DecisionReason.EXACT_IDENTIFIER_EVIDENCE
+        elif identity_matching and relation == IdentityRelation.EXACT_MODEL:
+            reason = DecisionReason.EXACT_MODEL_EVIDENCE
+        elif identity_matching and relation in {IdentityRelation.SAME_SERIES, IdentityRelation.SAME_FAMILY}:
+            reason = DecisionReason.FAMILY_COMPATIBLE_EVIDENCE
+        else:
+            reason = DecisionReason.CONTRACT_REQUIREMENTS_COVERED
     elif exact_identifier:
         decision, reason = Decision.ANSWER, DecisionReason.EXACT_IDENTIFIER_EVIDENCE
-    elif has_concrete_requirement and identity_matching and relation == IdentityRelation.EXACT_MODEL:
-        decision, reason = Decision.ANSWER, DecisionReason.EXACT_MODEL_EVIDENCE
-    elif has_concrete_requirement and identity_matching and relation in {
-        IdentityRelation.SAME_SERIES, IdentityRelation.SAME_FAMILY,
-    }:
-        decision, reason = Decision.ANSWER, DecisionReason.FAMILY_COMPATIBLE_EVIDENCE
     elif vector_distance is not None and vector_distance <= policy.max_vector_distance:
         if identity_matching and relation == IdentityRelation.EXACT_MODEL:
             decision, reason = Decision.ANSWER, DecisionReason.EXACT_MODEL_EVIDENCE
@@ -595,4 +462,5 @@ def analyze_retrieval_evidence(
         ),
         candidate_identity=candidate_identity.as_dict(),
         identity_relation=relation.value,
+        contract=contract.as_dict(),
     )
