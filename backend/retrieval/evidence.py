@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 
 from .filters import QueryAnalysis, analyze_query
-from .evidence_contract import evaluate_evidence_contract
+from .evidence_contract import evaluate_evidence_contract, identifier_supported
 from .product_identity import (
     IdentityRelation,
     ProductIdentity,
@@ -16,6 +16,7 @@ from .product_identity import (
     identity_from_metadata,
     identity_is_compatible,
     identity_relation,
+    normalize_identity_text,
 )
 from .technical import (
     contains_parameter_identifier,
@@ -296,7 +297,35 @@ def analyze_retrieval_evidence(
     )
     candidate_identity = identity_from_metadata(top_metadata)
     candidate_identities = [identity_from_metadata(candidate.metadata) for candidate in candidates]
-    query_identities = analysis.product_identities or (query_identity,)
+    explicit_corpus_identities: dict[tuple[str, str, str, str], ProductIdentity] = {}
+    normalized_query = normalize_identity_text(query)
+    for document in documents:
+        identity = identity_from_metadata(getattr(document, "metadata", {}) or {})
+        terms = tuple(filter(None, (
+            identity.equipment_model, identity.product_series, identity.product_family, *identity.aliases,
+        )))
+        normalized_terms = {
+            variant
+            for term in terms
+            for variant in (
+                normalize_identity_text(term),
+                re.sub(r"(?:-|\s*)series$", "", normalize_identity_text(term)),
+            )
+            if len(variant) >= 2 and any(character.isdigit() for character in variant)
+        }
+        if any(re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", normalized_query) for term in normalized_terms):
+            key = tuple(normalize_identity_text(getattr(identity, field)) for field in (
+                "manufacturer", "product_family", "product_series", "equipment_model"
+            ))
+            explicit_corpus_identities[key] = identity
+    analyzed_identities = analysis.product_identities or (query_identity,)
+    explicit_identities = tuple(explicit_corpus_identities.values())
+    analysis_matches_explicit = any(
+        identity_is_compatible(analyzed, explicit)
+        for analyzed in analyzed_identities
+        for explicit in explicit_identities
+    )
+    query_identities = analyzed_identities if analysis_matches_explicit or not explicit_identities else explicit_identities
     has_query_identity = any(
         identity.product_family or identity.product_series or identity.equipment_model
         for identity in query_identities
@@ -347,12 +376,10 @@ def analyze_retrieval_evidence(
         analysis.error_code
         and any(
             str(candidate.metadata.get("error_code", "")).casefold() == analysis.error_code.casefold()
-            or analysis.error_code.casefold() in {
-                match.group(0).casefold()
-                for match in EVIDENCE_IDENTIFIER_PATTERN.finditer(
-                    str(getattr(candidate.document, "page_content", "") or "")
-                )
-            }
+            or identifier_supported(
+                analysis.error_code,
+                normalize_technical_text(str(getattr(candidate.document, "page_content", "") or "")),
+            )
             for candidate in candidates
         )
     )
@@ -384,7 +411,7 @@ def analyze_retrieval_evidence(
         "POLARITY": DecisionReason.MISSING_VALUE_EVIDENCE,
         "REQUIREMENT_TYPE": DecisionReason.MISSING_REQUIREMENT_EVIDENCE,
     }
-    if analysis.error_code and analysis.error_code.lower() not in identifiers:
+    if analysis.error_code and not exact_identifier:
         decision, reason = Decision.ABSTAIN, DecisionReason.UNKNOWN_IDENTIFIER
     elif has_query_identity and not known_identity:
         decision, reason = Decision.ABSTAIN, DecisionReason.MODEL_MISMATCH

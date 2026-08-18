@@ -166,5 +166,5 @@ def test_evidence_then_support_pipeline_keeps_unsupported_detail_out():
 
 
 def test_rule_identity_changes_only_evidence_version():
-    assert EVIDENCE_SUPPORT_RULE_VERSION == "evidence-v320.1"
+    assert EVIDENCE_SUPPORT_RULE_VERSION == "evidence-v321.1"
     assert SUPPORT_RULE_VERSION == "support-v316.1"
