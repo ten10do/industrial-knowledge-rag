@@ -225,6 +225,10 @@ concept, action, attribute, and value/unit coverage. An `INSUFFICIENT` result
 skips the LLM and returns no citations. This layer is independent from retrieval
 distance calibration and does not treat reranker scores as entailment scores.
 
+The current development-only Evidence benchmark redesign, its leakage/freeze
+contract, and the V3.23 handoff protocol are documented in
+[`backend/evaluation/EVIDENCE_DEV_BENCHMARK_V2.md`](backend/evaluation/EVIDENCE_DEV_BENCHMARK_V2.md).
+
 V2.6 comparison semantics are intentionally target-specific: q13, q15, and q27 each label one target-model chunk, not a multi-document comparison set. `Recall@5=0` means those target chunks were absent from Top-5. Failure taxonomy is mutually exclusive and more specific metadata confusions (`MODEL_CONFUSION` / `IDENTIFIER_CONFUSION`) take precedence over generic `RECALL_FAILURE`; therefore zero comparison recall and zero generic recall failures are consistent.
 
 Run the real benchmark and optional smoke gate:
