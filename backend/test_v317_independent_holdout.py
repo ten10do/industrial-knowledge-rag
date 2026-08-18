@@ -1,6 +1,7 @@
 """Unit coverage for V3.17's frozen independent-holdout helpers."""
 
 import unittest
+from unittest.mock import patch
 
 from backend.evaluation.private_benchmark import annotation_hash
 from backend.evaluation.v317_independent_holdout import (
@@ -66,11 +67,15 @@ def _manifest():
 class IndependentHoldoutTests(unittest.TestCase):
     def test_complete_independent_holdout_validates_and_tamper_fails(self):
         manifest = _manifest()
-        distribution = validate_holdout_manifest(manifest)
-        self.assertEqual(distribution["support"], {"INSUFFICIENT": 16, "SUPPORTED": 20})
-        manifest["queries"][0]["query"] = "tampered after freeze"
-        with self.assertRaisesRegex(ValueError, "QUERY_HASH"):
-            validate_holdout_manifest(manifest)
+        with patch(
+            "backend.evaluation.v317_independent_holdout.EVIDENCE_SUPPORT_RULE_VERSION",
+            "v311.2",
+        ):
+            distribution = validate_holdout_manifest(manifest)
+            self.assertEqual(distribution["support"], {"INSUFFICIENT": 16, "SUPPORTED": 20})
+            manifest["queries"][0]["query"] = "tampered after freeze"
+            with self.assertRaisesRegex(ValueError, "QUERY_HASH"):
+                validate_holdout_manifest(manifest)
 
     def test_parser_metadata_failure_has_priority_in_failure_attribution(self):
         manifest = _manifest()

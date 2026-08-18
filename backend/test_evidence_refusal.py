@@ -57,7 +57,7 @@ def test_unknown_model_and_unsupported_detail_abstain_without_query_specific_rul
     unknown_model = analyze_retrieval_evidence("ABB ACS880 的参数是多少？", _result(document), [document], "vector")
     unsupported = analyze_retrieval_evidence("G120 端子需要多少 N·m 扭矩？", _result(document), [document], "vector")
     assert unknown_model.reason == DecisionReason.MODEL_MISMATCH.value
-    assert unsupported.reason == DecisionReason.INSUFFICIENT_EVIDENCE.value
+    assert unsupported.reason == DecisionReason.MISSING_VALUE_EVIDENCE.value
 
 
 def test_product_identity_normalizes_case_spacing_hyphens_and_series_suffix():
@@ -195,7 +195,7 @@ def test_unsupported_protocol_and_replacement_details_remain_protected():
     assert station.decision == "ABSTAIN"
     assert station.reason == DecisionReason.PROTOCOL_MISMATCH.value
     assert replacement.decision == "ABSTAIN"
-    assert replacement.reason == DecisionReason.INSUFFICIENT_EVIDENCE.value
+    assert replacement.reason == DecisionReason.MISSING_ACTION_EVIDENCE.value
 
 
 def test_unique_bare_model_can_claim_exact_model_support():

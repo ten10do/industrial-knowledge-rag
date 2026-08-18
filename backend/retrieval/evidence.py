@@ -8,6 +8,18 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 
 from .filters import QueryAnalysis, analyze_query
+from .evidence_support import (
+    ACTION_ALIASES,
+    EvidenceIntent,
+    _attribute_supported,
+    _concept_supported,
+    _contains_alias,
+    _local_value_supported,
+    _requirement_type_supported,
+    _unit_supported,
+    _value_kind_supported,
+    build_evidence_requirement,
+)
 from .product_identity import (
     IdentityRelation,
     ProductIdentity,
@@ -32,6 +44,7 @@ DETAIL_MARKERS = (
     "固件", "igbt", "pcb", "轴承", "润滑脂", "更换周期", "firmware", "backup",
     "certificate", "calibration", "torque", "bearing", "grease", "insulation",
     "bluetooth", "pairing", "station name", "mqtt", "broker",
+    "bacnet", "controlnet", "5g", "sil 3", "certif",
     "配对", "默认端口", "预防性更换", "主板电容",
 )
 EVIDENCE_IDENTIFIER_PATTERN = re.compile(
@@ -65,6 +78,12 @@ class DecisionReason(str, Enum):
     CROSS_EQUIPMENT = "CROSS_EQUIPMENT"
     UNKNOWN_PARAMETER = "UNKNOWN_PARAMETER"
     UNSUPPORTED_PROCEDURE = "UNSUPPORTED_PROCEDURE"
+    IDENTIFIER_NOT_IN_EVIDENCE = "IDENTIFIER_NOT_IN_EVIDENCE"
+    MISSING_ATTRIBUTE_EVIDENCE = "MISSING_ATTRIBUTE_EVIDENCE"
+    MISSING_VALUE_EVIDENCE = "MISSING_VALUE_EVIDENCE"
+    MISSING_REQUIREMENT_EVIDENCE = "MISSING_REQUIREMENT_EVIDENCE"
+    MISSING_ACTION_EVIDENCE = "MISSING_ACTION_EVIDENCE"
+    PARTIAL_EVIDENCE_ONLY = "PARTIAL_EVIDENCE_ONLY"
 
 
 @dataclass(frozen=True)
@@ -202,6 +221,135 @@ def _candidate_text(candidates: list) -> str:
         str(getattr(candidate.document, "page_content", "") or "")
         for candidate in candidates
     )
+
+
+_COMPONENT_IDENTIFIER_PATTERNS = (
+    re.compile(
+        r"(?<![a-z0-9])(?P<identifier>[a-z]{1,4}\d{1,4})(?=\s+(?:connector|port|terminal))",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:connector|port|terminal)\s+(?P<identifier>[a-z]{1,4}\d{1,4})(?![a-z0-9])",
+        re.IGNORECASE,
+    ),
+)
+_EVIDENCE_PROTOCOL_ALIASES = {
+    **PROTOCOL_ALIASES,
+    "bacnet": ("bacnet", "bacnet ms/tp", "bacnet mstp"),
+    "controlnet": ("controlnet",),
+    "5g": ("5g", "5g modem", "5g cellular"),
+}
+
+
+def _component_identifiers(query: str) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(
+        match.group("identifier").upper()
+        for pattern in _COMPONENT_IDENTIFIER_PATTERNS
+        for match in pattern.finditer(query or "")
+    ))
+
+
+def _identifier_in_current_evidence(identifier: str, candidates: list) -> bool:
+    """Require the requested identifier in the current evidence, not merely a
+    product-wide index or a cross-reference such as ``Related Parameters``."""
+    pattern = re.compile(
+        rf"(?<![a-z0-9.]){re.escape(identifier)}(?![a-z0-9.])",
+        re.IGNORECASE,
+    )
+    found = False
+    for candidate in candidates:
+        text = str(getattr(candidate.document, "page_content", "") or "")
+        spans = [match.span() for match in pattern.finditer(text)]
+        if not spans:
+            continue
+        found = True
+        for start, _ in spans:
+            prefix = text[max(0, start - 80):start]
+            if not re.search(r"related\s+parameters?\s*:[^\n]{0,60}$", prefix, re.IGNORECASE):
+                return True
+    return False if found else False
+
+
+def _requested_protocols(query: str, requirement) -> tuple[str, ...]:
+    normalized = normalize_technical_text(query)
+    explicit = [
+        name for name, aliases in _EVIDENCE_PROTOCOL_ALIASES.items()
+        if _contains_alias(normalized, aliases)
+    ]
+    return tuple(dict.fromkeys((*requirement.requested_protocol, *explicit)))
+
+
+def _requirement_preflight(
+    query: str, candidates: list, documents: list, analysis: QueryAnalysis,
+) -> tuple[DecisionReason | None, bool]:
+    """Reject only obvious requirement gaps before retrieval strength is used.
+
+    This is intentionally coarser than the Support gate: it checks presence and
+    scope, while final sufficiency and local aggregation remain Support's job.
+    """
+    requirement = build_evidence_requirement(query, documents, analysis)
+    text = normalize_technical_text(_candidate_text(candidates))
+    parameter_identifiers = tuple(
+        reference.identifier for reference in extract_parameter_references(query)
+    )
+    identifiers = tuple(dict.fromkeys((*requirement.identifiers, *_component_identifiers(query))))
+    has_concrete_requirement = bool(
+        identifiers
+        or requirement.requested_protocol
+        or requirement.requested_concepts
+        or requirement.requested_attributes
+        or requirement.requested_action
+        or requirement.requested_value
+        or requirement.requested_unit
+        or requirement.requested_value_kind
+        or requirement.requested_requirement_type != "general"
+    )
+
+    for identifier in identifiers:
+        if identifier in parameter_identifiers:
+            supported = _identifier_in_current_evidence(identifier, candidates)
+        else:
+            supported = _identifier_in_current_evidence(identifier, candidates)
+        if not supported:
+            return DecisionReason.IDENTIFIER_NOT_IN_EVIDENCE, has_concrete_requirement
+
+    for protocol in _requested_protocols(query, requirement):
+        if not _contains_alias(text, _EVIDENCE_PROTOCOL_ALIASES[protocol]):
+            return DecisionReason.PROTOCOL_MISMATCH, has_concrete_requirement
+
+    if any(not _concept_supported(name, text) for name in requirement.requested_concepts):
+        return DecisionReason.PARTIAL_EVIDENCE_ONLY, has_concrete_requirement
+    attributes = tuple(
+        name for name in requirement.requested_attributes
+        if name != "requirements" or requirement.requested_requirement_type != "general"
+    )
+    if any(not _attribute_supported(name, text) for name in attributes):
+        return DecisionReason.MISSING_ATTRIBUTE_EVIDENCE, has_concrete_requirement
+    action_required = EvidenceIntent(requirement.intent) in {
+        EvidenceIntent.PROCEDURE,
+        EvidenceIntent.FAULT_ACTION,
+        EvidenceIntent.SAFETY_REQUIREMENT,
+        EvidenceIntent.MAINTENANCE,
+    }
+    if action_required and any(
+        not _contains_alias(text, ACTION_ALIASES[name])
+        for name in requirement.requested_action
+    ):
+        return DecisionReason.MISSING_ACTION_EVIDENCE, has_concrete_requirement
+    if requirement.requested_unit and not _unit_supported(requirement.requested_unit, text):
+        return DecisionReason.MISSING_VALUE_EVIDENCE, has_concrete_requirement
+    if requirement.requested_value and requirement.requested_value.casefold() not in text:
+        return DecisionReason.MISSING_VALUE_EVIDENCE, has_concrete_requirement
+    if any(not _value_kind_supported(kind, text) for kind in requirement.requested_value_kind):
+        return DecisionReason.MISSING_VALUE_EVIDENCE, has_concrete_requirement
+    if requirement.requested_value_kind and not _local_value_supported(requirement, candidates):
+        return DecisionReason.MISSING_VALUE_EVIDENCE, has_concrete_requirement
+    if (
+        requirement.requested_requirement_type in {"compatibility", "prerequisite", "version"}
+        and not _requirement_type_supported(requirement, text)
+    ):
+        return DecisionReason.MISSING_REQUIREMENT_EVIDENCE, has_concrete_requirement
+    return None, has_concrete_requirement
 
 
 def _unsupported_protocol(query: str, candidates: list) -> str | None:
@@ -370,6 +518,9 @@ def analyze_retrieval_evidence(
     foreign_equipment = foreign_equipment_signal(query, documents)
     protocol_mismatch = _unsupported_protocol(query, candidates)
     unknown_parameter = _unknown_parameter(query, candidates, documents, analysis)
+    requirement_gap, has_concrete_requirement = _requirement_preflight(
+        query, candidates, documents, analysis,
+    )
     if analysis.error_code and analysis.error_code.lower() not in identifiers:
         decision, reason = Decision.ABSTAIN, DecisionReason.UNKNOWN_IDENTIFIER
     elif has_query_identity and not known_identity:
@@ -388,10 +539,18 @@ def analyze_retrieval_evidence(
         decision, reason = Decision.ABSTAIN, DecisionReason.UNKNOWN_PARAMETER
     elif _security_bypass_signal(query):
         decision, reason = Decision.ABSTAIN, DecisionReason.UNSUPPORTED_PROCEDURE
+    elif requirement_gap is not None:
+        decision, reason = Decision.ABSTAIN, requirement_gap
     elif unsupported_detail:
         decision, reason = Decision.ABSTAIN, DecisionReason.INSUFFICIENT_EVIDENCE
     elif exact_identifier:
         decision, reason = Decision.ANSWER, DecisionReason.EXACT_IDENTIFIER_EVIDENCE
+    elif has_concrete_requirement and identity_matching and relation == IdentityRelation.EXACT_MODEL:
+        decision, reason = Decision.ANSWER, DecisionReason.EXACT_MODEL_EVIDENCE
+    elif has_concrete_requirement and identity_matching and relation in {
+        IdentityRelation.SAME_SERIES, IdentityRelation.SAME_FAMILY,
+    }:
+        decision, reason = Decision.ANSWER, DecisionReason.FAMILY_COMPATIBLE_EVIDENCE
     elif vector_distance is not None and vector_distance <= policy.max_vector_distance:
         if identity_matching and relation == IdentityRelation.EXACT_MODEL:
             decision, reason = Decision.ANSWER, DecisionReason.EXACT_MODEL_EVIDENCE
