@@ -124,7 +124,8 @@ EVIDENCE_PROTOCOL_ALIASES = {
 SEMANTIC_ATTRIBUTE_ALIASES = {
     "waiting_time": ("delay", "time between", "wait", "waiting time", "restart delay", "cycle time", "program scan"),
     "status": ("selection", "option", "enabled", "disabled", "operational state"),
-    "cause": ("because", "therefore", "to ensure", "to prevent", "allows", "enables", "may cause", "may result"),
+    "cause": ("because", "therefore", "to ensure", "to prevent", "allows", "enables", "may cause", "may result",
+              "resulting in", "results in", "leads to", "lead to", "causes", "due to", "as a result"),
     "quantity": ("maximum number", "up to", "number of", "or fewer"),
 }
 SEMANTIC_VALUE_KIND_ALIASES = {
@@ -160,6 +161,34 @@ CANONICAL_ACTION_ALIASES = {
     "install": ("install", "installation", "mount"),
 }
 NUMBER_WORDS = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "ten": "10", "fifteen": "15", "twenty": "20", "thirty": "30", "sixty": "60"}
+
+# Open informational questions ("which/what/how ...") ask to locate a fact in
+# the corpus; yes/no questions ("does/is/can ...") ask to verify a claim. When an
+# open question extracts no typed critical requirement, its salient technical
+# tokens still must be locally present before an ANSWER is justified.
+_OPEN_QUESTION_RE = re.compile(
+    r"^\s*(?:which|what|how|why|when|where|between|by\s+what|with\s+what|in\s+which|from\s+which)\b",
+    re.IGNORECASE,
+)
+_KEYWORD_STOPWORDS = frozenset({
+    "a", "an", "and", "any", "are", "as", "at", "be", "been", "both", "by",
+    "can", "cannot", "could", "do", "does", "each", "for", "from", "has", "have",
+    "how", "in", "into", "is", "it", "its", "may", "must", "of", "on", "or",
+    "should", "such", "than", "that", "the", "their", "then", "there", "these",
+    "they", "this", "those", "to", "two", "was", "were", "what", "when", "where",
+    "which", "while", "why", "will", "with", "without", "would", "not", "only",
+    "used", "use", "using", "per", "via", "one",
+})
+_IDENTITY_GENERIC_WORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "by", "can", "code", "does", "for",
+    "from", "in", "is", "manual", "module", "of", "on", "or", "pc", "series",
+    "system", "the", "to", "type", "user", "with", "without", "controller",
+    "drive", "diagnostic", "diagnostics",
+})
+# Fraction of salient keywords an open-question candidate must cover. Keywords
+# are a topic-coverage fallback (question framing verbs and function words are
+# tolerated gaps), so a majority suffices rather than full coverage.
+_KEYWORD_COVERAGE_THRESHOLD = 0.5
 
 
 def _critical(kind: str, value: str, mode: RequirementMatchMode) -> TypedRequirementItem:
@@ -235,8 +264,19 @@ def _explicit_named_identifiers(query: str) -> tuple[str, ...]:
 
 
 def _mentioned_document_identities(query: str, documents: list) -> tuple[dict, ...]:
-    """Return distinct corpus identities explicitly named by the query."""
+    """Return distinct corpus identities explicitly named by the query.
+
+    A query may name a product by a partial form ("ArmorBlock" for
+    "ArmorBlock 5000") or a non-digit family ("ctrlX" for "ctrlX CORE"). Both
+    are recognised here as long as the variant is distinctive (carries a digit
+    or mixed case) and the matching token is not a generic word.
+    """
     normalized = normalize_identity_text(query)
+    query_tokens = {
+        token for token in re.findall(r"[a-z0-9]+", normalized)
+        if len(token) >= 3 and token not in _IDENTITY_GENERIC_WORDS
+    }
+    query_numbers = set(re.findall(r"\d+", normalized))
     matched: dict[tuple[str, str, str, str], dict] = {}
     for document in documents:
         identity = identity_from_metadata(getattr(document, "metadata", {}) or {})
@@ -253,10 +293,18 @@ def _mentioned_document_identities(query: str, documents: list) -> tuple[dict, .
                 normalize_identity_text(term),
                 re.sub(r"(?:-|\s*)series$", "", normalize_identity_text(term)),
             )
-            if len(variant) >= 2 and any(character.isdigit() for character in variant)
+            if len(variant) >= 3
+            and (any(character.isdigit() for character in variant)
+                 or re.search(r"^[a-z][a-z0-9]*[A-Z]", term) is not None)
         }
         if not any(
             re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", normalized)
+            or any(
+                term.startswith(token)
+                and len(token) >= max(3, len(term) // 2)
+                and (not (term_numbers := set(re.findall(r"\d+", term))) or query_numbers <= term_numbers)
+                for token in query_tokens
+            )
             for term in normalized_terms
         ):
             continue
@@ -368,6 +416,21 @@ def build_typed_requirement(query: str, documents: list, analysis) -> TypedEvide
                 else RequirementMatchMode.SEMANTIC_EQUIVALENT
             )
             items.append(_critical("detail", detail, mode))
+    if not any(item.criticality == RequirementCriticality.CRITICAL.value for item in items) and _OPEN_QUESTION_RE.match(query):
+        # Open questions with no typed critical requirement still name the fact
+        # being sought. Require its salient tokens to be locally present so an
+        # empty contract does not silently abstain on an answerable question.
+        identity_tokens = {
+            token for value in identity_values for token in re.findall(r"[a-z0-9]+", normalize_technical_text(value))
+        }
+        keywords = tuple(dict.fromkeys(
+            token for token in re.findall(r"[a-z0-9]+", normalize_technical_text(query))
+            if len(token) >= 3 and token not in _KEYWORD_STOPWORDS and token not in identity_tokens
+            and not token.isdigit()
+        ))
+        if len(keywords) >= 2:
+            for keyword in keywords:
+                items.append(_critical("keyword", keyword, RequirementMatchMode.NORMALIZED))
     unique = {(item.kind, item.value, item.criticality): item for item in items}
     relational = re.search(r"\b(?:used as|equal(?:s| to)?|associated with|corresponds? to|applies? to)\b", normalized) is not None
     identity = {"identities": list(mentioned_identities)} if len(mentioned_identities) > 1 else raw.target_identity
@@ -460,6 +523,18 @@ def _scope_supported(scope: str, text: str) -> bool:
     return False
 
 
+def _keyword_supported(keyword: str, text: str) -> bool:
+    """Match a salient keyword with light inflection stemming.
+
+    ``frequencies`` must match ``frequency`` and ``identifies`` must match
+    ``identify`` without opening the door to unrelated roots.
+    """
+    if _contains_alias(text, (keyword,)):
+        return True
+    stem = re.sub(r"(?:ies|es|s|ed|ing|d)$", "", keyword)
+    return len(stem) >= 4 and _contains_alias(text, (stem,))
+
+
 def _item_supported(item: TypedRequirementItem, claim: CandidateClaim) -> bool:
     text = claim.text
     if item.kind == "identifier":
@@ -472,6 +547,7 @@ def _item_supported(item: TypedRequirementItem, claim: CandidateClaim) -> bool:
                 return True
         return False
     if item.kind == "protocol": return _contains_alias(text, EVIDENCE_PROTOCOL_ALIASES[item.value])
+    if item.kind == "keyword": return _keyword_supported(item.value, text)
     if item.kind == "concept": return _concept_supported(item.value, text)
     if item.kind == "attribute": return _attribute_supported(item.value, text) or _contains_alias(text, SEMANTIC_ATTRIBUTE_ALIASES.get(item.value, ()))
     if item.kind == "action": return _action_supported(item.value, text)
@@ -635,6 +711,24 @@ def _identifier_anchors_claim(identifier: TypedRequirementItem, claim: Candidate
     ) is not None
 
 
+def _requirements_satisfied(critical: tuple[TypedRequirementItem, ...], covered: set[str]) -> bool:
+    """Return whether a group's coverage satisfies every critical requirement.
+
+    Typed requirements (identifier/protocol/attribute/value/action) must all be
+    covered. Keyword items are a topic-coverage fallback and only need a
+    majority, because question framing verbs and function words are not part of
+    the fact being verified.
+    """
+    non_keyword = [item for item in critical if item.kind != "keyword"]
+    keywords = [item for item in critical if item.kind == "keyword"]
+    if any(_item_key(item) not in covered for item in non_keyword):
+        return False
+    if not keywords:
+        return True
+    covered_keywords = sum(1 for item in keywords if _item_key(item) in covered)
+    return covered_keywords / len(keywords) >= _KEYWORD_COVERAGE_THRESHOLD
+
+
 def evaluate_evidence_contract(query: str, candidates: list, documents: list, analysis) -> EvidenceContractResult:
     requirement = build_typed_requirement(query, documents, analysis)
     claims = tuple(extract_candidate_claim(candidate, requirement) for candidate in candidates)
@@ -657,7 +751,7 @@ def evaluate_evidence_contract(query: str, candidates: list, documents: list, an
         if not compatible: continue
         covered = {_item_key(item) for item in critical if any(_item_supported(item, claim) for claim in group)}
         if len(covered) > len(best_covered): best_covered, best_level = covered, level
-        if len(covered) == len(critical) and _association_safe(requirement, group):
+        if _requirements_satisfied(critical, covered) and _association_safe(requirement, group):
             return EvidenceContractResult(True, True, "CRITICAL_REQUIREMENTS_COVERED", level.value, requirement, claims, tuple(sorted(covered)), ())
     missing = tuple(_item_key(item) for item in critical if _item_key(item) not in best_covered)
     reason = "UNSAFE_REQUIREMENT_ASSOCIATION" if not missing else f"MISSING_{missing[0].split(':',1)[0].upper()}_CLAIM"

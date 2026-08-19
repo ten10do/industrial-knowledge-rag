@@ -14,7 +14,7 @@ from dataclasses import dataclass
 # Version tag for the Evidence/Support generalization rules. Bump whenever the
 # cross-corpus normalization / matching rules change; the calibration freeze
 # records this so later runs can be attributed.
-EVIDENCE_SUPPORT_RULE_VERSION = "evidence-v321.1"
+EVIDENCE_SUPPORT_RULE_VERSION = "evidence-v323.1-candidate"
 
 # Industrial fieldbus / communication protocols, mapped to their acceptable
 # written forms. Distinct protocols are deliberately separate: a device that

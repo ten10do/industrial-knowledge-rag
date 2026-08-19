@@ -34,6 +34,13 @@ DETAIL_MARKERS = (
     "bacnet", "controlnet", "5g", "sil 3", "certif",
     "配对", "默认端口", "预防性更换", "主板电容",
 )
+# Generic words that must never resolve to a corpus identity, even when they
+# share a prefix with one (e.g. "embedded pc" family, "series" suffix).
+_IDENTITY_GENERIC_WORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "by", "can", "does", "for", "from",
+    "in", "is", "manual", "module", "of", "on", "or", "pc", "series", "system",
+    "the", "to", "type", "user", "with", "without", "controller", "drive",
+})
 EVIDENCE_IDENTIFIER_PATTERN = re.compile(
     r"(?<![a-z0-9])(?:0x[0-9a-f]+|[faceps]\d{2,5}|mw\d{1,5}|4\d{4})(?![a-z0-9])",
     re.IGNORECASE,
@@ -299,6 +306,8 @@ def analyze_retrieval_evidence(
     candidate_identities = [identity_from_metadata(candidate.metadata) for candidate in candidates]
     explicit_corpus_identities: dict[tuple[str, str, str, str], ProductIdentity] = {}
     normalized_query = normalize_identity_text(query)
+    query_tokens = {token for token in re.findall(r"[a-z0-9]+", normalized_query) if len(token) >= 3 and token not in _IDENTITY_GENERIC_WORDS}
+    query_numbers = set(re.findall(r"\d+", normalized_query))
     for document in documents:
         identity = identity_from_metadata(getattr(document, "metadata", {}) or {})
         terms = tuple(filter(None, (
@@ -311,9 +320,20 @@ def analyze_retrieval_evidence(
                 normalize_identity_text(term),
                 re.sub(r"(?:-|\s*)series$", "", normalize_identity_text(term)),
             )
-            if len(variant) >= 2 and any(character.isdigit() for character in variant)
+            if len(variant) >= 3
+            and (any(character.isdigit() for character in variant)
+                 or re.search(r"^[a-z][a-z0-9]*[A-Z]", term) is not None)
         }
-        if any(re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", normalized_query) for term in normalized_terms):
+        if any(
+            re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", normalized_query)
+            or any(
+                term.startswith(token)
+                and len(token) >= max(3, len(term) // 2)
+                and (not (term_numbers := set(re.findall(r"\d+", term))) or query_numbers <= term_numbers)
+                for token in query_tokens
+            )
+            for term in normalized_terms
+        ):
             key = tuple(normalize_identity_text(getattr(identity, field)) for field in (
                 "manufacturer", "product_family", "product_series", "equipment_model"
             ))

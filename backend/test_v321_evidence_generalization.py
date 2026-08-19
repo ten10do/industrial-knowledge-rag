@@ -101,5 +101,6 @@ def test_dev_check_one_shot_lock(monkeypatch, tmp_path):
     monkeypatch.setattr(gate, "CANDIDATE_FREEZE", freeze)
     monkeypatch.setattr(gate, "ensure_private_path", lambda path: path)
     monkeypatch.setattr(gate, "candidate_rule_hashes", lambda: rule_hashes)
+    monkeypatch.setattr(gate, "EVIDENCE_SUPPORT_RULE_VERSION", gate.CANDIDATE_VERSION)
     with pytest.raises(RuntimeError, match="ALREADY_CONSUMED"):
         gate._check_phase_allowed("candidate", {"freeze": {"manifest_sha256": "check-hash"}})
