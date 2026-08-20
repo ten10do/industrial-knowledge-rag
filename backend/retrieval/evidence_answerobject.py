@@ -54,6 +54,10 @@ GROUNDED_SPAN_CANDIDATE_VERSION = "evidence-v328-grounded-span-candidate"
 GROUNDED_SPAN_CANDIDATE_STATUS = "EXPERIMENTAL_CANDIDATE"
 LLM_EXTRACTION_USED = "NO"
 
+# V3.29 boundary disposition.  Grounded answer spans are optional enrichment for
+# the downstream answer layer; they have no decision authority over ANSWER/ABSTAIN.
+GROUNDED_SPAN_DISPOSITION = "OPTIONAL_EVIDENCE_PAYLOAD"
+
 
 class AnswerType(str, Enum):
     IDENTIFIER = "IDENTIFIER"

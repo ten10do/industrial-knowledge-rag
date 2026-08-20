@@ -52,6 +52,15 @@ QUERY_TYPE_CANDIDATE_STATUS = "EXPERIMENTAL_CANDIDATE"
 # This study uses deterministic candidate-grounded extraction only.
 LLM_EXTRACTION_USED = "NO"
 
+# V3.29 boundary disposition.  VERIFIER_ONLY is the reference decision path and
+# the only mode with decision authority.  EXTRACT_ONLY / EXTRACT_THEN_VERIFY are
+# experimental and MUST NOT become production eligibility dependencies.
+MODE_DISPOSITION = {
+    "VERIFIER_ONLY": "REFERENCE",
+    "EXTRACT_ONLY": "EXPERIMENTAL_NOT_RECOMMENDED",
+    "EXTRACT_THEN_VERIFY": "EXPERIMENTAL_NOT_RECOMMENDED",
+}
+
 
 class EvidenceQueryType(str, Enum):
     VERIFICATION = "VERIFICATION"
