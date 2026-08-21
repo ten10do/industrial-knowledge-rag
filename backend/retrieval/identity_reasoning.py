@@ -1,4 +1,4 @@
-"""Deterministic claim-level identity boundary for the V3.34 candidate.
+"""Deterministic claim-level identity boundary for the V3.36 utility candidate.
 
 This module is additive.  It does not change retrieval or the existing Evidence
 contract.  Reliable identity mismatches abstain before the frozen V3.32 mixed
@@ -8,11 +8,13 @@ candidate; compatible and unknown cases delegate unchanged.
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass, field
+from copy import copy
+from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from typing import Any
 
 from .evidence_contract import build_typed_requirement
+from .candidates import RetrievalResult
 from .evidence_mixed import analyze_mixed_evidence
 from .evidence_querytype import EvidenceQueryType, route_query_type
 from .filters import analyze_query
@@ -20,7 +22,7 @@ from .product_identity import normalize_identity_text
 from .technical import PROTOCOL_ALIASES, matched_terms
 
 
-IDENTITY_AWARE_CANDIDATE_VERSION = "identity-aware-evidence-v334-candidate"
+IDENTITY_AWARE_CANDIDATE_VERSION = "identity-v336-candidate"
 IDENTITY_AWARE_CANDIDATE_STATUS = "EXPERIMENTAL_CANDIDATE"
 
 
@@ -48,13 +50,17 @@ class ProductIdentity:
     module: str = ""
     option: str = ""
     firmware: str = ""
+    firmware_floor: bool = False
     protocol: tuple[str, ...] = ()
     parameter: str = ""
+    covered_models: tuple[str, ...] = ()
+    scope_universal: bool = False
     scope_level: str = ScopeLevel.GLOBAL.value
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["protocol"] = list(self.protocol)
+        payload["covered_models"] = list(self.covered_models)
         return payload
 
     @property
@@ -104,6 +110,7 @@ class IdentityAwareEvidenceDecision:
     final_decision_source: str
     identity_boundary: dict[str, Any]
     delegated_to_existing_evidence: bool
+    identity_alignment_applied: bool
     existing_evidence: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
@@ -160,12 +167,17 @@ def _context_identifier(text: str, words: str) -> str:
     return ""
 
 
-def _firmware(text: str) -> str:
+def _firmware(text: str) -> tuple[str, bool]:
+    normalized = _normalized(text)
     match = re.search(
         r"\b(?:firmware|fw|revision|version)\s*(?:version|rev\.?|v)?\s*[:=]?\s*(\d+(?:\.\d+)+)\b",
-        _normalized(text), re.IGNORECASE,
+        normalized, re.IGNORECASE,
     )
-    return match.group(1) if match else ""
+    if not match:
+        return "", False
+    suffix = normalized[match.end():match.end() + 24]
+    floor = bool(re.match(r"\s*(?:or|and)\s+(?:later|newer|higher)\b", suffix, re.IGNORECASE))
+    return match.group(1), floor
 
 
 def _parameter(text: str) -> str:
@@ -226,7 +238,7 @@ def extract_query_identity(query: str, documents: list) -> ProductIdentity:
     metadata, matched, field = _matching_metadata(query, metadata_items)
     module = _context_identifier(query, _MODULE_WORDS)
     option = _context_identifier(query, _OPTION_WORDS)
-    firmware = _firmware(query)
+    firmware, firmware_floor = _firmware(query)
     parameter = _parameter(query)
     scope = _scope_for_match(field, matched, metadata, query) if matched else ScopeLevel.GLOBAL
 
@@ -263,6 +275,7 @@ def extract_query_identity(query: str, documents: list) -> ProductIdentity:
         module=module,
         option=option,
         firmware=firmware,
+        firmware_floor=firmware_floor,
         protocol=_protocols(query),
         parameter=parameter,
         scope_level=scope.value,
@@ -283,7 +296,7 @@ def extract_claim_identity(text: str, metadata: dict) -> ProductIdentity:
     matched_metadata, matched, field = _matching_metadata(text, metadata_items)
     module = _context_identifier(text, _MODULE_WORDS)
     option = _context_identifier(text, _OPTION_WORDS)
-    firmware = _firmware(text)
+    firmware, firmware_floor = _firmware(text)
     parameter = _parameter(text)
     scope = _scope_for_match(field, matched, matched_metadata, text) if matched else ScopeLevel.GLOBAL
 
@@ -305,6 +318,12 @@ def extract_claim_identity(text: str, metadata: dict) -> ProductIdentity:
         series = _text(metadata.get("product_series", ""))
         family = _text(metadata.get("product_family", ""))
 
+    covered_models = _metadata_values(metadata, "document_scope_models")
+    scope_universal = bool(
+        str(metadata.get("document_scope_policy", "")).upper() == "ALL_LISTED_MODELS"
+        and re.search(r"\b(?:all|every|each)\b", _normalized(text), re.IGNORECASE)
+    )
+
     return ProductIdentity(
         manufacturer=_text(metadata.get("manufacturer", "")),
         family=family,
@@ -313,8 +332,11 @@ def extract_claim_identity(text: str, metadata: dict) -> ProductIdentity:
         module=module,
         option=option,
         firmware=firmware,
+        firmware_floor=firmware_floor,
         protocol=_protocols(text),
         parameter=parameter,
+        covered_models=covered_models,
+        scope_universal=scope_universal,
         scope_level=scope.value,
     )
 
@@ -323,49 +345,96 @@ def _same(left: str, right: str) -> bool:
     return bool(left and right and _normalized(left) == _normalized(right))
 
 
+def _descendant_variant(requested: str, observed: str) -> bool:
+    """A base identity may be covered by an explicitly named child variant."""
+    base, child = _normalized(requested), _normalized(observed)
+    return bool(base and child.startswith(base + " "))
+
+
+def _version(value: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(part) for part in value.split("."))
+    except ValueError:
+        return ()
+
+
+def _covered_model(query_model: str, evidence: ProductIdentity) -> bool:
+    return any(
+        _same(query_model, covered) or _descendant_variant(query_model, covered)
+        for covered in evidence.covered_models
+    )
+
+
 def identity_compatibility(query: ProductIdentity, evidence: ProductIdentity) -> tuple[IdentityCompatibility, str]:
     if not query.constrained:
         return IdentityCompatibility.UNKNOWN, "QUERY_IDENTITY_UNKNOWN"
     if query.manufacturer and evidence.manufacturer and not _same(query.manufacturer, evidence.manufacturer):
         return IdentityCompatibility.INCOMPATIBLE, "MANUFACTURER_MISMATCH"
 
-    for field, reason in (("firmware", "FIRMWARE_MISMATCH"), ("parameter", "PARAMETER_SCOPE_MISMATCH")):
-        requested = getattr(query, field)
-        observed = getattr(evidence, field)
-        if requested and observed and not _same(requested, observed):
-            return IdentityCompatibility.INCOMPATIBLE, reason
-        if requested and not observed and evidence.constrained:
-            return IdentityCompatibility.INCOMPATIBLE, reason
+    firmware_range = False
+    if query.firmware:
+        if evidence.firmware and not _same(query.firmware, evidence.firmware):
+            requested, observed = _version(query.firmware), _version(evidence.firmware)
+            if evidence.firmware_floor and not query.firmware_floor and requested and observed and requested >= observed:
+                firmware_range = True
+            else:
+                return IdentityCompatibility.INCOMPATIBLE, "FIRMWARE_MISMATCH"
+        elif not evidence.firmware and evidence.constrained:
+            return IdentityCompatibility.INCOMPATIBLE, "FIRMWARE_MISMATCH"
+    if query.parameter:
+        if evidence.parameter and not _same(query.parameter, evidence.parameter):
+            return IdentityCompatibility.INCOMPATIBLE, "PARAMETER_SCOPE_MISMATCH"
+        if not evidence.parameter and evidence.constrained:
+            return IdentityCompatibility.INCOMPATIBLE, "PARAMETER_SCOPE_MISMATCH"
+
+    def compatible(reason: str) -> tuple[IdentityCompatibility, str]:
+        return IdentityCompatibility.COMPATIBLE, (
+            "FIRMWARE_RANGE_COVERS_QUERY" if firmware_range else reason
+        )
 
     if query.module:
         if evidence.module:
-            return (IdentityCompatibility.COMPATIBLE, "EXACT_MODULE") if _same(query.module, evidence.module) else (IdentityCompatibility.INCOMPATIBLE, "MODULE_MISMATCH")
+            if _same(query.module, evidence.module):
+                return compatible("EXACT_MODULE")
+            if _descendant_variant(query.module, evidence.module):
+                return compatible("MODULE_VARIANT_DESCENDANT")
+            return IdentityCompatibility.INCOMPATIBLE, "MODULE_MISMATCH"
         return (IdentityCompatibility.INCOMPATIBLE, "MODULE_TO_CONTROLLER_LEAKAGE") if evidence.constrained else (IdentityCompatibility.UNKNOWN, "CLAIM_IDENTITY_UNKNOWN")
 
     if query.option:
         if evidence.option:
-            return (IdentityCompatibility.COMPATIBLE, "EXACT_OPTION") if _same(query.option, evidence.option) else (IdentityCompatibility.INCOMPATIBLE, "OPTION_MISMATCH")
+            if _same(query.option, evidence.option):
+                return compatible("EXACT_OPTION")
+            if _descendant_variant(query.option, evidence.option):
+                return compatible("OPTION_VARIANT_DESCENDANT")
+            return IdentityCompatibility.INCOMPATIBLE, "OPTION_MISMATCH"
         return (IdentityCompatibility.INCOMPATIBLE, "OPTION_SCOPE_MISMATCH") if evidence.constrained else (IdentityCompatibility.UNKNOWN, "CLAIM_IDENTITY_UNKNOWN")
 
     if query.model:
         if evidence.model:
-            return (IdentityCompatibility.COMPATIBLE, "EXACT_MODEL") if _same(query.model, evidence.model) else (IdentityCompatibility.INCOMPATIBLE, "MODEL_MISMATCH")
+            if _same(query.model, evidence.model):
+                return compatible("EXACT_MODEL")
+            if _descendant_variant(query.model, evidence.model):
+                return compatible("MODEL_VARIANT_DESCENDANT")
+            return IdentityCompatibility.INCOMPATIBLE, "MODEL_MISMATCH"
         if evidence.scope_level in {ScopeLevel.FAMILY.value, ScopeLevel.SERIES.value}:
+            if evidence.scope_universal and _covered_model(query.model, evidence):
+                return compatible("DOCUMENT_SCOPE_COVERS_MODEL")
             return IdentityCompatibility.INCOMPATIBLE, "BROADER_EVIDENCE_SCOPE"
         return IdentityCompatibility.UNKNOWN, "CLAIM_IDENTITY_UNKNOWN"
 
     if query.series:
         if evidence.model and query.family and _same(query.family, evidence.family):
-            return IdentityCompatibility.COMPATIBLE, "MODEL_DESCENDS_FROM_SERIES"
+            return compatible("MODEL_DESCENDS_FROM_SERIES")
         if evidence.series:
-            return (IdentityCompatibility.COMPATIBLE, "SAME_SERIES") if _same(query.series, evidence.series) else (IdentityCompatibility.INCOMPATIBLE, "SERIES_MISMATCH")
+            return compatible("SAME_SERIES") if _same(query.series, evidence.series) else (IdentityCompatibility.INCOMPATIBLE, "SERIES_MISMATCH")
         if evidence.family:
             return IdentityCompatibility.INCOMPATIBLE, "BROADER_EVIDENCE_SCOPE"
         return IdentityCompatibility.UNKNOWN, "CLAIM_IDENTITY_UNKNOWN"
 
     if query.family:
         if evidence.family:
-            return (IdentityCompatibility.COMPATIBLE, "SAME_FAMILY") if _same(query.family, evidence.family) else (IdentityCompatibility.INCOMPATIBLE, "FAMILY_MISMATCH")
+            return compatible("SAME_FAMILY") if _same(query.family, evidence.family) else (IdentityCompatibility.INCOMPATIBLE, "FAMILY_MISMATCH")
         return IdentityCompatibility.UNKNOWN, "CLAIM_IDENTITY_UNKNOWN"
     return IdentityCompatibility.UNKNOWN, "QUERY_IDENTITY_UNKNOWN"
 
@@ -404,6 +473,52 @@ def _query_path(query: str, documents: list, analysis: Any) -> str:
     return "FALLBACK"
 
 
+def _aligned_evidence_view(query: str, identity: ProductIdentity, boundary: IdentityBoundaryResult, result, documents: list):
+    """Align proven-compatible claim metadata for the unchanged Evidence contract.
+
+    This view is local to the candidate call. It never mutates retrieval output,
+    stored chunks, or the caller's documents, and is never applied to UNKNOWN or
+    INCOMPATIBLE claims.
+    """
+    target = identity.module or identity.option or identity.model or identity.series or identity.family
+    if not target:
+        return result, documents, False
+    compatible_ids = {
+        check.chunk_id for check in boundary.candidates
+        if check.compatibility == IdentityCompatibility.COMPATIBLE.value
+    }
+    clones: dict[int, object] = {}
+    candidates = []
+    for candidate in list(getattr(result, "candidates", []) or []):
+        metadata = getattr(candidate, "metadata", {}) or {}
+        if str(metadata.get("chunk_id", "")) not in compatible_ids:
+            candidates.append(candidate)
+            continue
+        document = copy(candidate.document)
+        aligned = dict(metadata)
+        aliases = list(_metadata_values(aligned, "model_aliases", "aliases"))
+        if target not in aliases:
+            aliases.append(target)
+        aligned["equipment_model"] = target
+        aligned["model_aliases"] = "|".join(aliases)
+        document.metadata = aligned
+        clones[id(candidate.document)] = document
+        candidates.append(replace(candidate, document=document, exact_metadata_match=True))
+    if not clones:
+        return result, documents, False
+    aligned_documents = [clones.get(id(document), document) for document in documents]
+    aligned_result = RetrievalResult(
+        candidates,
+        query_analysis=analyze_query(query, aligned_documents),
+        corpus_documents=aligned_documents,
+        retrieval_mode=getattr(result, "retrieval_mode", ""),
+        scope_decision=getattr(result, "scope_decision", None),
+        section_report=getattr(result, "section_report", None),
+        trace=getattr(result, "trace", None),
+    )
+    return aligned_result, aligned_documents, True
+
+
 def analyze_identity_aware_evidence(
     query: str,
     result,
@@ -416,7 +531,7 @@ def analyze_identity_aware_evidence(
     requirement: Any = None,
     apply_open_sufficiency: bool = True,
 ) -> IdentityAwareEvidenceDecision:
-    """Apply the V3.34 boundary, then delegate unchanged when it permits it."""
+    """Apply the V3.36 utility boundary, then delegate to frozen Evidence."""
     boundary = analyze_identity_boundary(query, result, documents)
     if boundary.status == IdentityCompatibility.INCOMPATIBLE.value:
         analysis = getattr(result, "query_analysis", None) or analyze_query(query, documents)
@@ -428,10 +543,16 @@ def analyze_identity_aware_evidence(
             final_decision_source="IDENTITY_BOUNDARY",
             identity_boundary=boundary.as_dict(),
             delegated_to_existing_evidence=False,
+            identity_alignment_applied=False,
         )
 
+    evidence_result, evidence_documents, aligned = result, documents, False
+    if boundary.status == IdentityCompatibility.COMPATIBLE.value:
+        evidence_result, evidence_documents, aligned = _aligned_evidence_view(
+            query, boundary.query_identity, boundary, result, documents,
+        )
     existing = analyze_mixed_evidence(
-        query, result, documents, retrieval_mode,
+        query, evidence_result, evidence_documents, retrieval_mode,
         judge=judge, policy=policy, identity_matching=identity_matching,
         requirement=requirement, apply_open_sufficiency=apply_open_sufficiency,
     )
@@ -443,5 +564,6 @@ def analyze_identity_aware_evidence(
         final_decision_source=existing.final_decision_source,
         identity_boundary=boundary.as_dict(),
         delegated_to_existing_evidence=True,
+        identity_alignment_applied=aligned,
         existing_evidence=existing.as_dict(),
     )

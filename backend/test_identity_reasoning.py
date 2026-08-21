@@ -1,4 +1,4 @@
-"""Deterministic tests for the V3.34 identity-aware Evidence candidate."""
+"""Deterministic tests for the V3.36 identity utility candidate."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def _result(document) -> RetrievalResult:
 
 
 def test_candidate_identity_is_explicitly_versioned():
-    assert IDENTITY_AWARE_CANDIDATE_VERSION == "identity-aware-evidence-v334-candidate"
+    assert IDENTITY_AWARE_CANDIDATE_VERSION == "identity-v336-candidate"
     assert IDENTITY_AWARE_CANDIDATE_STATUS == "EXPERIMENTAL_CANDIDATE"
 
 
@@ -125,6 +125,64 @@ def test_firmware_mismatch_is_incompatible():
     claim = extract_claim_identity(document.page_content, document.metadata)
     assert identity_compatibility(query, claim) == (
         IdentityCompatibility.INCOMPATIBLE, "FIRMWARE_MISMATCH",
+    )
+
+
+def test_base_model_query_accepts_explicit_child_variant_but_not_reverse():
+    document = _document(
+        "CX5140-0123 supports EtherCAT.",
+        model_aliases="CX5140|CX5140-0123|CX5130",
+    )
+    base_query = extract_query_identity("Does CX5140 support EtherCAT?", [document])
+    variant_claim = extract_claim_identity(document.page_content, document.metadata)
+    assert identity_compatibility(base_query, variant_claim) == (
+        IdentityCompatibility.COMPATIBLE, "MODEL_VARIANT_DESCENDANT",
+    )
+
+    broad_document = _document(
+        "CX5140 supports EtherCAT.",
+        model_aliases="CX5140|CX5140-0123|CX5130",
+    )
+    variant_query = extract_query_identity("Does CX5140-0123 support EtherCAT?", [broad_document])
+    broad_claim = extract_claim_identity(broad_document.page_content, broad_document.metadata)
+    assert identity_compatibility(variant_query, broad_claim) == (
+        IdentityCompatibility.INCOMPATIBLE, "MODEL_MISMATCH",
+    )
+
+
+def test_firmware_or_later_range_covers_newer_query_only():
+    document = _document("CX5140 firmware 2.1 or later supports EtherCAT.")
+    claim = extract_claim_identity(document.page_content, document.metadata)
+    newer = extract_query_identity("Does CX5140 firmware 2.3 support EtherCAT?", [document])
+    older = extract_query_identity("Does CX5140 firmware 2.0 support EtherCAT?", [document])
+    assert identity_compatibility(newer, claim) == (
+        IdentityCompatibility.COMPATIBLE, "FIRMWARE_RANGE_COVERS_QUERY",
+    )
+    assert identity_compatibility(older, claim) == (
+        IdentityCompatibility.INCOMPATIBLE, "FIRMWARE_MISMATCH",
+    )
+
+
+def test_universal_document_scope_requires_policy_marker_and_covered_model():
+    metadata = {
+        "document_scope_models": "CX5140|CX5130",
+        "document_scope_policy": "ALL_LISTED_MODELS",
+    }
+    document = _document("All CX series models support EtherCAT.", **metadata)
+    query = extract_query_identity("Does CX5140 support EtherCAT?", [document])
+    claim = extract_claim_identity(document.page_content, document.metadata)
+    assert identity_compatibility(query, claim) == (
+        IdentityCompatibility.COMPATIBLE, "DOCUMENT_SCOPE_COVERS_MODEL",
+    )
+
+    local = _document(
+        "The CX series overview describes EtherCAT.",
+        document_scope_models="CX5140|CX5130",
+        document_scope_policy="SECTION_LOCAL",
+    )
+    local_claim = extract_claim_identity(local.page_content, local.metadata)
+    assert identity_compatibility(query, local_claim) == (
+        IdentityCompatibility.INCOMPATIBLE, "BROADER_EVIDENCE_SCOPE",
     )
 
 
@@ -203,6 +261,7 @@ def test_compatible_case_delegates_without_changing_existing_decision():
     )
     assert candidate.identity_boundary["status"] == "COMPATIBLE"
     assert candidate.delegated_to_existing_evidence
+    assert candidate.identity_alignment_applied
     assert (candidate.decision, candidate.reason) == (baseline.decision, baseline.reason)
 
 
@@ -223,4 +282,20 @@ def test_unknown_case_delegates_without_changing_existing_decision():
     )
     assert boundary.status == "UNKNOWN"
     assert candidate.delegated_to_existing_evidence
+    assert not candidate.identity_alignment_applied
     assert (candidate.decision, candidate.reason) == (baseline.decision, baseline.reason)
+
+
+def test_compatible_submodule_alignment_is_local_and_reaches_existing_evidence():
+    document = _document(
+        "The EL6751 module supports EtherCAT.", module_model="EL6751",
+    )
+    original_model = document.metadata["equipment_model"]
+    candidate = analyze_identity_aware_evidence(
+        "Does the EL6751 module support EtherCAT?", _result(document), [document], "hybrid",
+        apply_open_sufficiency=False,
+    )
+    assert candidate.identity_boundary["status"] == "COMPATIBLE"
+    assert candidate.identity_alignment_applied
+    assert candidate.decision == "ANSWER"
+    assert document.metadata["equipment_model"] == original_model
