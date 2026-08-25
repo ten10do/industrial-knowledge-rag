@@ -248,8 +248,11 @@ def _edge_covers(
 def reconstruct_logical_cells_v3(
     document_id: str,
     page_index: int,
-    page,
+    page=None,
     use_edges: bool = True,
+    atoms: list[CapturedTextAtom] | None = None,
+    h_edges: list[GeometryEdge] | None = None,
+    v_edges: list[GeometryEdge] | None = None,
 ) -> dict:
     """Rectangle-first reconstruction (final refinement).
 
@@ -258,12 +261,17 @@ def reconstruct_logical_cells_v3(
        with proof SAME_EXPLICIT_CELL_RECT.
     2. Atoms outside rectangles stay per-visual-line fragments split by
        x-gaps — same-column stacking is ambiguous and NOT auto-merged.
+
+    atoms/h_edges/v_edges may be injected by an alternative capture
+    provider (e.g., PyMuPDF); otherwise they are derived from `page`.
     """
-    atoms, edges = capture_page_atoms(page)
+    if atoms is None or h_edges is None or v_edges is None:
+        captured_atoms, edges = capture_page_atoms(page)
+        atoms = captured_atoms
+        h_edges = [e for e in edges if e.orientation == "h"] if use_edges else []
+        v_edges = [e for e in edges if e.orientation == "v"] if use_edges else []
     if not atoms:
         return {"cells": [], "atoms": [], "row_bands": [], "column_bands": []}
-    h_edges = [e for e in edges if e.orientation == "h"] if use_edges else []
-    v_edges = [e for e in edges if e.orientation == "v"] if use_edges else []
 
     h_bands = _cluster_bands([e.position for e in h_edges], 2.5)
     v_bands = _cluster_bands([e.position for e in v_edges], 2.5)
