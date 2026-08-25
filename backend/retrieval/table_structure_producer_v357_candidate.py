@@ -645,8 +645,39 @@ def analyze_and_reconstruct(
     return ReconstructionReport(tables=report.tables, digest=report.result_digest())
 
 
-def build_candidate_report(document_id: str, pages: Iterable[Any]) -> tuple[ReconstructionReport, dict[str, int], dict[str, int]]:
-    """Full pipeline: pypdf pages -> analyses -> candidate reconstruction."""
+def build_candidate_report(
+    document_id: str,
+    pages: Iterable[Any],
+    strategy: str = "coordinate",
+) -> tuple[ReconstructionReport, dict[str, int], dict[str, int]]:
+    """Full pipeline over pypdf pages.
+
+    strategy:
+      - "coordinate": text fragments + ruling geometry (V3.56 lineage)
+      - "layout":     public layout-mode text blocks (no CMap wall)
+    """
+    if strategy == "layout":
+        from .table_structure_producer_v357_layout import reconstruct_from_layout
+
+        tables: list[ProducerTable] = []
+        taxonomy: dict[str, int] = {}
+        for index, page in enumerate(pages):
+            try:
+                layout_text = page.extract_text(extraction_mode="layout") or ""
+            except Exception:  # noqa: BLE001
+                layout_text = ""
+            page_tables = reconstruct_from_layout(document_id, index, layout_text)
+            if not page_tables:
+                taxonomy["PAGE_SKIPPED"] = taxonomy.get("PAGE_SKIPPED", 0) + 1
+            tables.extend(page_tables)
+        observability = {"pages": len(pages), "regions": len(tables)}
+        report = ReconstructionReport(tables=tuple(tables))
+        return (
+            ReconstructionReport(tables=report.tables, digest=report.result_digest()),
+            taxonomy,
+            observability,
+        )
+
     analyses: list[tuple[int, PageAnalysis]] = []
     taxonomy: dict[str, int] = {}
     for index, page in enumerate(pages):
@@ -664,6 +695,8 @@ def with_effective_label_column(table: ProducerTable) -> ProducerTable:
 
     Real pages accumulate stray clusters (footnotes, captions); the true
     label column is the leftmost column that recurs across many rows.
+    The original first column competes on equal terms — it often IS the
+    label column on clean regions.
     """
     data_rows = [
         r for r in table.row_ids if r not in set(table.header_row_ids)
@@ -672,21 +705,19 @@ def with_effective_label_column(table: ProducerTable) -> ProducerTable:
         return table
     cell_map = {(c.row_id, c.column_id): c for c in table.cells}
     counts: dict[str, int] = {}
-    for cid in table.column_ids[1:]:
+    for cid in table.column_ids:
         n = sum(1 for r in data_rows if (r, cid) in cell_map)
         counts[cid] = n
     threshold = max(3, int(0.35 * len(data_rows)))
     effective = next(
-        (cid for cid in table.column_ids[1:] if counts.get(cid, 0) >= threshold),
+        (cid for cid in table.column_ids if counts.get(cid, 0) >= threshold),
         None,
     )
-    if effective is None:
+    if effective is None or effective == table.column_ids[0]:
         return table
     reordered = [effective] + [
-        cid for cid in table.column_ids[1:] if cid != effective
+        cid for cid in table.column_ids if cid != effective
     ]
-    # Preserve the original trailing clusters behind the label column.
-    reordered.append(table.column_ids[0])
     return ProducerTable(
         document_id=table.document_id,
         table_region_id=table.table_region_id,
