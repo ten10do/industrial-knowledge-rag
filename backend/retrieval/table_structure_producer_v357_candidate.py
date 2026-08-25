@@ -649,28 +649,75 @@ def build_candidate_report(
     document_id: str,
     pages: Iterable[Any],
     strategy: str = "coordinate",
+    row_policy: str = "r3_guard",
+    y_tolerance: float = 2.5,
 ) -> tuple[ReconstructionReport, dict[str, int], dict[str, int]]:
     """Full pipeline over pypdf pages.
 
     strategy:
       - "coordinate": text fragments + ruling geometry (V3.56 lineage)
       - "layout":     public layout-mode text blocks (no CMap wall)
+    row_policy (layout strategy only):
+      - "r3_guard":                 R3 wrap-absorption guard only
+      - "ruling_strong_split":      full-width rulings force new rows
+      - "ruling_full_plus_partial": + qualified partial rulings
     """
     if strategy == "layout":
-        from .table_structure_producer_v357_layout import reconstruct_from_layout
+        from collections import Counter
+
+        from .table_structure_producer_v357_layout import (
+            cluster_h_rulings,
+            match_line_y_positions,
+            reconstruct_from_layout,
+        )
+        from .table_structure_producer_v357_walk import walk_page_content
 
         tables: list[ProducerTable] = []
         taxonomy: dict[str, int] = {}
+        observability: dict[str, int] = {"pages": len(pages)}
+        boundary_log: list[dict] = []
+        reader = None
         for index, page in enumerate(pages):
+            if reader is None:
+                indirect = getattr(page, "indirect_reference", None)
+                reader = getattr(indirect, "pdf", None) if indirect else None
             try:
                 layout_text = page.extract_text(extraction_mode="layout") or ""
             except Exception:  # noqa: BLE001
                 layout_text = ""
-            page_tables = reconstruct_from_layout(document_id, index, layout_text)
+            raw_frags, raw_segments = walk_page_content(page, _reader_of(page))
+            visitor_frags = [
+                (f.x, f.y, f.text)
+                for f in _visitor_fragments(page, index)
+            ]
+            h_rulings = cluster_h_rulings(
+                [s for s in raw_segments if s.horizontal],
+            )
+            lines = layout_text.splitlines()
+            line_positions = match_line_y_positions(lines, visitor_frags)
+            xs = [x for x, _y in line_positions if x is not None]
+            global_span = (
+                min(xs) if xs else 0.0,
+                max((f.x + 40.0 for f in _visitor_fragments(page, index)), default=612.0),
+            )
+            page_tables = reconstruct_from_layout(
+                document_id,
+                index,
+                layout_text,
+                h_rulings=h_rulings if row_policy != "r3_guard" else None,
+                line_positions=line_positions if row_policy != "r3_guard" else None,
+                policy=row_policy,
+                y_tolerance=y_tolerance,
+                global_x_span=global_span,
+                boundary_log=boundary_log,
+            )
             if not page_tables:
                 taxonomy["PAGE_SKIPPED"] = taxonomy.get("PAGE_SKIPPED", 0) + 1
             tables.extend(page_tables)
-        observability = {"pages": len(pages), "regions": len(tables)}
+        observability["regions"] = len(tables)
+        verdicts = Counter(b["verdict"] for b in boundary_log)
+        for verdict, count in verdicts.items():
+            taxonomy[f"BOUNDARY_{verdict}"] = count
         report = ReconstructionReport(tables=tuple(tables))
         return (
             ReconstructionReport(tables=report.tables, digest=report.result_digest()),

@@ -28,12 +28,174 @@ MIN_BLOCK_COLUMNS = 2
 GAP_SPLIT_MIN_SPACES = 2
 BLOCK_BREAK_BLANK_LINES = 1
 
+# Row-boundary provenance codes (directive §19).
+BOUNDARY_SOURCE_RULING = "RULING_LINE"
+BOUNDARY_SOURCE_LAYOUT_GEOMETRY = "LAYOUT_GEOMETRY"
+BOUNDARY_SOURCE_AMBIGUOUS = "AMBIGUOUS"
+
+
+@dataclass(frozen=True)
+class HorizontalRuling:
+    """One horizontal ruling band in device space (directive §10)."""
+
+    page: int
+    y: float
+    x_start: float
+    x_end: float
+    source: str = "vector_path"       # vector_line | rect_edge | vector_path
+    confidence: float = 0.7
+    thickness: float = 0.0
+
+    @property
+    def length(self) -> float:
+        return max(self.x_end - self.x_start, 0.0)
+
+
+@dataclass(frozen=True)
+class RowBoundaryEvidence:
+    """Evidence verdict for the boundary between two adjacent text rows."""
+
+    verdict: str                      # STRONG_NEW_ROW | POSSIBLE_NEW_ROW |
+                                      # NO_RULING_SUPPORT | AMBIGUOUS
+    reason_code: str
+    confidence: float
+    ruling_ids: tuple[str, ...]
+    coverage_ratio: float = 0.0
+
 
 @dataclass(frozen=True)
 class LayoutToken:
     start: int
     end: int
     text: str
+
+
+def match_line_y_positions(
+    layout_lines: list[str],
+    visitor_fragments: list[tuple[float, float, str]],
+) -> list[tuple[float | None, float | None]]:
+    """Assign each layout line a (y, x) via best word-Jaccard visitor match."""
+    frag_index = [
+        (_canon(text), x, y)
+        for x, y, text in visitor_fragments
+        if len(_canon(text)) >= 8
+    ]
+    positions: list[tuple[float | None, float | None]] = []
+    for line in layout_lines:
+        words = set(_words(line))
+        best_y, best_x, best_score = None, None, 0.0
+        for ftext, fx, fy in frag_index:
+            fwords = set(_words(ftext))
+            if not words or not fwords:
+                continue
+            score = len(words & fwords) / max(len(words | fwords), 1)
+            if score > best_score:
+                best_score, best_y, best_x = score, fy, fx
+        positions.append(
+            (best_y if best_score >= 0.5 else None,
+             best_x if best_score >= 0.5 else None),
+        )
+    return positions
+
+
+def cluster_h_rulings(
+    segments: list[Any],
+) -> list[HorizontalRuling]:
+    """Cluster horizontal stroke segments into ruling bands."""
+    bands: dict[float, dict] = {}
+    order: list[float] = []
+    for seg in sorted(segments, key=lambda s: s.y0):
+        if not seg.horizontal:
+            continue
+        key = round((seg.y0 + seg.y1) / 2, 1)
+        existing = next((k for k in order if abs(k - key) <= 2.0), None)
+        if existing is None:
+            order.append(key)
+            bands[key] = {
+                "y": key,
+                "x_start": min(seg.x0, seg.x1),
+                "x_end": max(seg.x0, seg.x1),
+                "thickness": abs(seg.y1 - seg.y0),
+            }
+        else:
+            b = bands[existing]
+            b["x_start"] = min(b["x_start"], seg.x0, seg.x1)
+            b["x_end"] = max(b["x_end"], seg.x0, seg.x1)
+            b["thickness"] = max(b["thickness"], abs(seg.y1 - seg.y0))
+    return [
+        HorizontalRuling(
+            page=-1,
+            y=b["y"],
+            x_start=b["x_start"],
+            x_end=b["x_end"],
+            source="vector_path",
+            confidence=0.7,
+            thickness=round(b.get("thickness", 0.0), 2),
+        )
+        for k in sorted(bands)
+        for b in [bands[k]]
+    ]
+
+
+def _words(text: str) -> list[str]:
+    return [w for w in _canon(text).split() if len(w) >= 2]
+
+
+def _canon(text: str) -> str:
+    replacements = {
+        "–": "-", "—": "-", "−": "-", "’": "'", "‘": "'",
+        "“": '"', "”": '"', "…": "...", "\u00a0": " ",
+    }
+    for src, dst in replacements.items():
+        text = text.replace(src, dst)
+    return norm_text(text)
+
+
+def boundary_evidence(
+    upper_y: float | None,
+    lower_y: float | None,
+    rulings: list[HorizontalRuling],
+    content_x0: float,
+    content_x1: float,
+    y_tolerance: float = 2.5,
+) -> RowBoundaryEvidence:
+    """Classify the boundary between two stacked lines (§12-§14)."""
+    if upper_y is None or lower_y is None or upper_y <= lower_y:
+        return RowBoundaryEvidence("NO_RULING_SUPPORT", "NO_LINE_Y", 0.0, (), 0.0)
+    gap_lo, gap_hi = lower_y + y_tolerance, upper_y - y_tolerance
+    if gap_hi <= gap_lo:
+        return RowBoundaryEvidence("NO_RULING_SUPPORT", "GAP_TOO_SMALL", 0.0, (), 0.0)
+    span = max(content_x1 - content_x0, 1.0)
+    crossing = [
+        r for r in rulings
+        if gap_lo <= r.y <= gap_hi
+        and min(r.x_end, content_x1) - max(r.x_start, content_x0) > 0
+    ]
+    if not crossing:
+        return RowBoundaryEvidence("NO_RULING_SUPPORT", "NO_CROSSING_RULING", 0.0, (), 0.0)
+    ids: list[str] = []
+    best_coverage = 0.0
+    for i, r in enumerate(crossing):
+        overlap = (
+            min(r.x_end, content_x1) - max(r.x_start, content_x0)
+        )
+        coverage = max(overlap / span, 0.0)
+        best_coverage = max(best_coverage, coverage)
+        ids.append(f"r{i}@{round(r.y, 1)}")
+    if best_coverage >= 0.8:
+        return RowBoundaryEvidence(
+            "STRONG_NEW_ROW", "FULL_ROW_RULING", 0.9, tuple(ids),
+            round(best_coverage, 3),
+        )
+    if best_coverage >= 0.35:
+        return RowBoundaryEvidence(
+            "POSSIBLE_NEW_ROW", "PARTIAL_ROW_RULING", 0.6, tuple(ids),
+            round(best_coverage, 3),
+        )
+    return RowBoundaryEvidence(
+        "AMBIGUOUS", "LOCAL_CELL_RULING", 0.3, tuple(ids),
+        round(best_coverage, 3),
+    )
 
 
 def tokenize_layout_line(line: str, min_gap: int = GAP_SPLIT_MIN_SPACES) -> list[LayoutToken]:
@@ -149,9 +311,17 @@ def reconstruct_from_layout(
     document_id: str,
     page_index: int,
     layout_text: str,
+    *,
+    h_rulings: list[HorizontalRuling] | None = None,
+    line_positions: list[tuple[float | None, float | None]] | None = None,
+    policy: str = "r3_guard",
+    y_tolerance: float = 2.5,
+    global_x_span: tuple[float, float] = (0.0, 612.0),
+    boundary_log: list[dict] | None = None,
 ) -> list[ProducerTable]:
     lines = layout_text.splitlines()
     tables: list[ProducerTable] = []
+    rulings = h_rulings or []
     for block in page_blocks(lines):
         # Keep line numbers and token rows strictly parallel: a block line
         # with zero tokens (rare whitespace artifacts) is dropped together
@@ -243,7 +413,46 @@ def reconstruct_from_layout(
                 continue
             hits_label = any(a == 0 for a in assignment)
             has_other = any(a > 0 for a in assignment)
-            if assembled and not hits_label and has_other:
+            ruling_forces_split = False
+            boundary_source = BOUNDARY_SOURCE_LAYOUT_GEOMETRY
+            if (
+                policy != "r3_guard"
+                and rulings
+                and line_positions is not None
+                and local_r >= 1
+            ):
+                upper_y, _ux = line_positions[local_r - 1]
+                lower_y, _lx = line_positions[local_r]
+                content_x0, content_x1 = global_x_span
+                if _ux is not None:
+                    content_x0 = min(content_x0, _ux)
+                if _lx is not None:
+                    content_x0 = min(content_x0, _lx)
+                evidence = boundary_evidence(
+                    upper_y, lower_y, rulings,
+                    content_x0, max(content_x1, content_x0 + 1.0),
+                    y_tolerance=y_tolerance,
+                )
+                if boundary_log is not None:
+                    boundary_log.append(
+                        {
+                            "page": page_index,
+                            "block_line": block_numbers[local_r],
+                            "verdict": evidence.verdict,
+                            "reason": evidence.reason_code,
+                            "confidence": evidence.confidence,
+                            "coverage": evidence.coverage_ratio,
+                        },
+                    )
+                if evidence.verdict == "STRONG_NEW_ROW":
+                    ruling_forces_split = True
+                    boundary_source = BOUNDARY_SOURCE_RULING
+                elif evidence.verdict == "POSSIBLE_NEW_ROW" and policy == "ruling_full_plus_partial":
+                    ruling_forces_split = True
+                    boundary_source = BOUNDARY_SOURCE_RULING
+            hits_label = any(a == 0 for a in assignment)
+            has_other = any(a > 0 for a in assignment)
+            if assembled and not hits_label and has_other and not ruling_forces_split:
                 snapshot = {
                     key: list(pieces) for key, pieces in assembled[-1].items()
                 }
