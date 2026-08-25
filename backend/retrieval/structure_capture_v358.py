@@ -214,7 +214,15 @@ def reconstruct_logical_cells(
     page,
     use_edges: bool = True,
 ) -> dict:
-    """Return atoms, edges, row/column bands and logical cells."""
+    """Return atoms, edges, row/column bands and logical cells.
+
+    R4-refinement: per-band x-projection columns plus h-edge-aware wrap
+    merging. Row bands are derived first; each band gets its own column
+    spans from the x-projection of its atoms (falling back to strong
+    v-edges). A band whose label region is empty while value columns carry
+    text is treated as a wrapped continuation of the previous band when NO
+    strong h-edge separates them; otherwise it stays a distinct row.
+    """
     atoms, edges = capture_page_atoms(page)
     if not atoms:
         return {"cells": [], "atoms": [], "row_bands": [], "column_bands": []}
@@ -225,38 +233,103 @@ def reconstruct_logical_cells(
         h_edges = []
         v_edges = []
     row_bands = derive_row_bands(atoms, h_edges)
-    column_bands = derive_column_bands(atoms, v_edges)
 
-    grid: dict[tuple[int, int], list[CapturedTextAtom]] = {}
-    for atom in atoms:
-        r, c = assign_atom_to_cell(atom, row_bands, column_bands)
-        grid.setdefault((r, c), []).append(atom)
-
-    region_key_source = f"{document_id}:p{page_index}"
-    cells: list[LogicalCell] = []
-    for (r, c), group in sorted(grid.items()):
-        ordered = sorted(group, key=lambda a: (round(a.y0, 1), a.x0))
-        fragments = tuple(_fix(a.text) for a in ordered)
-        normalized = " ".join(fragments)
-        proofs = ["SAME_COLUMN_NO_SEPARATOR"]
-        cells.append(
-            LogicalCell(
-                cell_id=f"{region_key_source}:c:r{r}k{c}",
-                page=page_index,
-                row_band=row_bands[r],
-                column_band=column_bands[c],
-                fragments=fragments,
-                normalized_text=normalized,
-                merge_proofs=tuple(proofs),
-                boundary_confidence="GEOMETRIC_BOUNDARY"
-                if h_edges or v_edges
-                else "INFERRED_BOUNDARY",
-            ),
+    def h_edge_between(y_lo: float, y_hi: float) -> bool:
+        return any(
+            y_lo + 1.5 <= e.position <= y_hi - 1.5 for e in h_edges
         )
+
+    # Column spans per band via x-projection with gap threshold.
+    def column_spans_for(band_atoms: list[CapturedTextAtom]) -> list[tuple[float, float]]:
+        if not band_atoms:
+            return []
+        intervals = sorted((a.x0, a.x1) for a in band_atoms)
+        merged_spans: list[tuple[float, float]] = [intervals[0]]
+        gap_threshold = 14.0
+        for start, end in intervals[1:]:
+            last_start, last_end = merged_spans[-1]
+            if start - last_end <= gap_threshold:
+                merged_spans[-1] = (last_start, max(last_end, end))
+            else:
+                merged_spans.append((start, end))
+        return merged_spans
+
+    logical_rows: list[dict] = []
+    for lo, hi in row_bands:
+        band_atoms = [
+            a for a in atoms if lo - 0.5 <= (a.y0 + a.y1) / 2 <= hi + 0.5
+        ]
+        if not band_atoms:
+            continue
+        spans = column_spans_for(band_atoms)
+        assigned: dict[int, list[str]] = {}
+        for atom in band_atoms:
+            center = (atom.x0 + atom.x1) / 2
+            col_index = next(
+                (i for i, (s, e) in enumerate(spans) if s <= center <= e),
+                None,
+            )
+            if col_index is None:
+                best_i, best_d = -1, float("inf")
+                for i, (s, e) in enumerate(spans):
+                    d = min(abs(center - s), abs(center - e))
+                    if d < best_d:
+                        best_i, best_d = i, d
+                col_index = max(best_i, 0)
+            assigned.setdefault(col_index, []).append(_fix(atom.text))
+        logical_rows.append(
+            {
+                "band": (lo, hi),
+                "columns": assigned,
+                "label_empty": 0 not in assigned,
+            },
+        )
+
+    # Wrap merging: a row whose label region is empty while other columns
+    # have text continues the previous row ONLY when no strong h-edge
+    # separates the two bands (§16-§17 fusion rule).
+    merged_rows: list[dict] = []
+    merge_proofs_by_row: list[list[str]] = []
+    for row in logical_rows:
+        if (
+            merged_rows
+            and row["label_empty"]
+            and any(row["columns"].values())
+            and not h_edge_between(
+                merged_rows[-1]["band"][0], row["band"][1],
+            )
+        ):
+            target = merged_rows[-1]
+            for col, texts in row["columns"].items():
+                target["columns"].setdefault(col, []).extend(texts)
+            merge_proofs_by_row[-1].append("VERTICAL_CONTINUATION_WITHIN_CELL")
+            continue
+        merged_rows.append(row)
+        merge_proofs_by_row.append([])
+
+    cells: list[LogicalCell] = []
+    for index, row in enumerate(merged_rows):
+        lo, hi = row["band"]
+        for col, pieces in sorted(row["columns"].items()):
+            normalized = " ".join(pieces)
+            cells.append(
+                LogicalCell(
+                    cell_id=f"{document_id}:p{page_index}:r{index}:c{col}",
+                    page=page_index,
+                    row_band=(lo, hi),
+                    column_band=(col * 1.0, col * 1.0),
+                    fragments=tuple(pieces),
+                    normalized_text=normalized,
+                    merge_proofs=tuple(merge_proofs_by_row[index]),
+                    boundary_confidence="GEOMETRIC_BOUNDARY"
+                    if h_edges
+                    else "INFERRED_BOUNDARY",
+                ),
+            )
     return {
         "cells": cells,
         "atoms": atoms,
         "row_bands": row_bands,
-        "column_bands": column_bands,
-        "region_key": region_key_source,
+        "column_bands": [],
+        "region_key": f"{document_id}:p{page_index}",
     }
