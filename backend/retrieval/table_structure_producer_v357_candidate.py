@@ -690,30 +690,136 @@ def build_candidate_report(
     return report, taxonomy, {k: v for _, a in analyses for k, v in a.observability.items()}
 
 
-def with_effective_label_column(table: ProducerTable) -> ProducerTable:
-    """Rotate column order so the most-recurrent leftmost data column leads.
+# --------------------------------------------------------------------------
+# LabelColumnScore — multi-feature label-column inference (R3)
+# --------------------------------------------------------------------------
 
-    Real pages accumulate stray clusters (footnotes, captions); the true
-    label column is the leftmost column that recurs across many rows.
-    The original first column competes on equal terms — it often IS the
-    label column on clean regions.
+LABEL_SCORE_WEIGHTS: dict[str, float] = {
+    "left_prior": 1.0,
+    "text_ratio": 1.2,
+    "coverage": 0.4,
+    "numeric_penalty": -1.6,
+    "unit_penalty": -0.8,
+    "param_id_bonus": 0.5,
+}
+LABEL_AMBIGUOUS_MARGIN = 0.15
+
+_UNIT_PATTERN = re.compile(
+    r"^[-+]?[\d.,]+\s?(?:a|v|v ac|v dc|w|kw|hz|ma|rpm|mm|n(?:m)?|s|ms|%|bar|psi)?\b\.?$",
+    re.IGNORECASE,
+)
+_PARAM_ID_PATTERN = re.compile(
+    r"^(?:[a-z]{1,3}[.\-]?\d{1,4}[a-z]?|\d{1,3}-\d{1,3})$",
+    re.IGNORECASE,
+)
+
+
+def _alpha_ratio(text: str) -> float:
+    letters = sum(1 for ch in text if ch.isalpha())
+    return letters / max(len(text), 1)
+
+
+def _digit_ratio(text: str) -> float:
+    digits = sum(1 for ch in text if ch.isdigit())
+    return digits / max(len(text), 1)
+
+
+def _is_value_like(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    has_digit = any(ch.isdigit() for ch in stripped)
+    return _UNIT_PATTERN.match(stripped) is not None or (
+        has_digit and _digit_ratio(stripped) >= 0.34
+        and not _PARAM_ID_PATTERN.match(stripped)
+    )
+
+
+def score_label_columns(table: ProducerTable) -> tuple[list[dict], bool]:
+    """Score every column as a candidate label column.
+
+    Returns (ranked candidates, ambiguous_flag). Each candidate carries the
+    feature vector and its reason code so ablations can attribute wins.
     """
     data_rows = [
         r for r in table.row_ids if r not in set(table.header_row_ids)
     ]
-    if not data_rows or len(table.column_ids) <= 1:
-        return table
+    n_rows = len(data_rows)
+    n_cols = len(table.column_ids)
+    if not data_rows or n_cols < 2:
+        return [], False
     cell_map = {(c.row_id, c.column_id): c for c in table.cells}
-    counts: dict[str, int] = {}
-    for cid in table.column_ids:
-        n = sum(1 for r in data_rows if (r, cid) in cell_map)
-        counts[cid] = n
-    threshold = max(3, int(0.35 * len(data_rows)))
-    effective = next(
-        (cid for cid in table.column_ids if counts.get(cid, 0) >= threshold),
-        None,
+
+    candidates: list[dict] = []
+    for index, cid in enumerate(table.column_ids):
+        texts = [
+            cell_map[(r, cid)].text
+            for r in data_rows
+            if (r, cid) in cell_map
+        ]
+        coverage = len(texts) / n_rows
+        non_empty = [t for t in texts if t.strip()]
+        text_ratio = (
+            sum(_alpha_ratio(t) for t in non_empty) / max(len(non_empty), 1)
+        )
+        value_like = sum(1 for t in non_empty if _is_value_like(t))
+        param_ids = sum(1 for t in non_empty if _PARAM_ID_PATTERN.match(t.strip()))
+        numeric_ratio = value_like / max(len(non_empty), 1)
+        param_id_ratio = param_ids / max(len(non_empty), 1)
+        unit_ratio = (
+            sum(1 for t in non_empty if _UNIT_PATTERN.match(t.strip()))
+            / max(len(non_empty), 1)
+        )
+        left_prior = 1.0 - index / max(n_cols - 1, 1)
+
+        features = {
+            "left_prior": round(left_prior, 3),
+            "text_ratio": round(text_ratio, 3),
+            "coverage": round(coverage, 3),
+            "numeric_ratio": round(numeric_ratio, 3),
+            "unit_ratio": round(unit_ratio, 3),
+            "param_id_ratio": round(param_id_ratio, 3),
+        }
+        score = (
+            LABEL_SCORE_WEIGHTS["left_prior"] * left_prior
+            + LABEL_SCORE_WEIGHTS["text_ratio"] * text_ratio
+            + LABEL_SCORE_WEIGHTS["coverage"] * coverage
+            + LABEL_SCORE_WEIGHTS["numeric_penalty"] * numeric_ratio
+            + LABEL_SCORE_WEIGHTS["unit_penalty"] * unit_ratio
+            + LABEL_SCORE_WEIGHTS["param_id_bonus"] * param_id_ratio
+        )
+        reason = "label_candidate"
+        if numeric_ratio >= 0.6:
+            reason = "value_column_numeric_dominant"
+        elif unit_ratio >= 0.5:
+            reason = "value_column_unit_dominant"
+        candidates.append(
+            {
+                "column_id": cid,
+                "score": round(score, 4),
+                **features,
+                "reason_code": reason,
+            },
+        )
+    candidates.sort(key=lambda c: -c["score"])
+    ambiguous = (
+        len(candidates) >= 2
+        and (candidates[0]["score"] - candidates[1]["score"]) < LABEL_AMBIGUOUS_MARGIN
     )
-    if effective is None or effective == table.column_ids[0]:
+    return candidates, ambiguous
+
+
+def with_effective_label_column(table: ProducerTable) -> ProducerTable:
+    """Rotate column order so the scored best label column leads.
+
+    When the top two candidates are within LABEL_AMBIGUOUS_MARGIN the
+    original order is kept (ambiguous abstention at rotation level).
+    """
+    scored, _ambiguous = score_label_columns(table)
+    if not scored:
+        return table
+    effective = scored[0]["column_id"]
+    if effective == table.column_ids[0]:
         return table
     reordered = [effective] + [
         cid for cid in table.column_ids if cid != effective
@@ -733,8 +839,78 @@ def with_effective_label_column(table: ProducerTable) -> ProducerTable:
     )
 
 
+def without_section_caption_cell(table: ProducerTable) -> ProducerTable:
+    """Drop the caption cell from the grid before binding.
+
+    Layout regions keep the printed caption line inside the block; as a
+    cell it sits in the label column and falsely registers as a model-row
+    label when the query model text derives from the same caption.
+    """
+    if not table.section_caption:
+        return table
+    caption_norm = norm_text(table.section_caption)
+    filtered = tuple(
+        c for c in table.cells if norm_text(c.text) != caption_norm
+    )
+    if len(filtered) == len(table.cells):
+        return table
+    return ProducerTable(
+        document_id=table.document_id,
+        table_region_id=table.table_region_id,
+        page_indices=table.page_indices,
+        column_ids=table.column_ids,
+        row_ids=table.row_ids,
+        header_row_ids=table.header_row_ids,
+        cells=filtered,
+        header_paths=table.header_paths,
+        vertical_merges=table.vertical_merges,
+        section_caption="",
+        section_caption_page=-1,
+    )
+
+
+def prepare_table_for_binding(table: ProducerTable) -> ProducerTable:
+    """Binding-time region cleanup:
+
+    1. drop single-cell rows (captions, footnotes) — they sit in the label
+       column but never constitute model rows, and their texts collide
+       with document-scoped model strings;
+    2. rotate so the most-recurrent leftmost column leads.
+    """
+    label_col0 = table.column_ids[0]
+    cells_by_row: dict[str, list[ProducerCell]] = {}
+    for c in table.cells:
+        cells_by_row.setdefault(c.row_id, []).append(c)
+    single_cell_rows = {
+        rid
+        for rid, cells in cells_by_row.items()
+        if len(cells) == 1 and cells[0].column_id == label_col0
+    }
+    filtered = tuple(
+        c for c in table.cells if c.row_id not in single_cell_rows
+    )
+    stripped = (
+        table
+        if len(filtered) == len(table.cells)
+        else ProducerTable(
+            document_id=table.document_id,
+            table_region_id=table.table_region_id,
+            page_indices=table.page_indices,
+            column_ids=table.column_ids,
+            row_ids=table.row_ids,
+            header_row_ids=table.header_row_ids,
+            cells=filtered,
+            header_paths=table.header_paths,
+            vertical_merges=table.vertical_merges,
+            section_caption=table.section_caption,
+            section_caption_page=table.section_caption_page,
+        )
+    )
+    return with_effective_label_column(stripped)
+
+
 def bind_claim_candidate(table: ProducerTable, request: BindingRequest) -> ProducerOutcome:
-    adjusted = with_effective_label_column(table)
+    adjusted = prepare_table_for_binding(table)
     outcome = _v356_bind_claim_to_table(adjusted, request)
     if not outcome.emitted and outcome.decline is not None:
         mapped = (

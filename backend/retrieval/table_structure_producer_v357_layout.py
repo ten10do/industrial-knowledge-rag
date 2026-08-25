@@ -9,6 +9,7 @@ that sidesteps the CMap decoding wall entirely.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 
@@ -213,14 +214,24 @@ def reconstruct_from_layout(
         row_line_number: list[int] = []
         header_cells: dict[tuple[int, int], str] = {}
 
-        def _absorb(local_r: int, target_index: int) -> None:
+        def _absorb(local_r: int, target_index: int) -> bool:
+            """Absorb continuation tokens into EMPTY columns of the target
+            row only. A line that fills already-occupied columns is a NEW
+            logical row (e.g., the second half of a vertical merge), not a
+            wrap — merging it would destroy row identity and exact cell
+            texts."""
+            absorbed_any = False
             for a, tok in zip(assignments[local_r], token_rows[local_r]):
                 if a < 0:
                     continue
                 text = fix_letterspacing(tok.text)
-                bucket = assembled[target_index].setdefault(a, [])
-                if not bucket or bucket[-1] != text:
-                    bucket.append(text)
+                bucket = assembled[target_index].get(a)
+                if bucket:
+                    # Column occupied above -> distinct logical row signal.
+                    return False
+                assembled[target_index][a] = [text]
+                absorbed_any = True
+            return absorbed_any
 
         for local_r in range(len(assignments)):
             tokens = token_rows[local_r]
@@ -233,8 +244,12 @@ def reconstruct_from_layout(
             hits_label = any(a == 0 for a in assignment)
             has_other = any(a > 0 for a in assignment)
             if assembled and not hits_label and has_other:
-                _absorb(local_r, len(assembled) - 1)
-                continue
+                snapshot = {
+                    key: list(pieces) for key, pieces in assembled[-1].items()
+                }
+                if _absorb(local_r, len(assembled) - 1):
+                    continue
+                assembled[-1] = snapshot  # rollback partial absorption
             new_row: dict[int, list[str]] = {}
             for a, tok in zip(assignment, tokens):
                 if a < 0:
