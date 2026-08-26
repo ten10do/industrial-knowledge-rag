@@ -53,19 +53,19 @@ def build_index() -> tuple[int, int]:
 
 
 def make_evidence_record(evidence: RetrievalEvidence) -> EvidenceEvaluationRecord:
-    """Adapter: serialize real Evidence output."""
+    """Adapter: serialize real Evidence output using authoritative contract fields."""
+    contract = evidence.contract or {}
     return EvidenceEvaluationRecord(
         decision=evidence.decision,
         reason=evidence.reason,
         query_identity=dict(evidence.query_identity),
         candidate_identity=dict(evidence.candidate_identity),
         identity_relation=evidence.identity_relation,
-        contract_requirements_covered=evidence.contract.get(
-            "requirements_covered", False,
-        ),
+        contract_requirements_covered=bool(contract.get("sufficient", False)),
         lexical_score=evidence.lexical_score,
         vector_distance=evidence.vector_distance,
         metadata_consistency=evidence.metadata_consistency,
+        covered_claim_keys=frozenset(contract.get("covered", [])),
     )
 
 
