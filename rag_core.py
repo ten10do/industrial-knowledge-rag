@@ -29,6 +29,7 @@ load_dotenv()
 def load_pdf(file_path: str):
     """
     读取 PDF 文件，并过滤空白页面。
+    V3.73: attach document-level identity metadata from filename.
     """
     loader = PyPDFLoader(file_path)
     documents = loader.load()
@@ -42,6 +43,20 @@ def load_pdf(file_path: str):
     for page_number, doc in enumerate(documents):
         doc.metadata["source"] = source_name
         doc.metadata.setdefault("page", page_number)
+
+    # V3.73: enrich with document-level identity (query-agnostic).
+    try:
+        from backend.retrieval.document_identity_v373 import (
+            resolve_document_identity,
+        )
+        identity = resolve_document_identity(file_path)
+        for doc in documents:
+            for key in ("manufacturer", "product_family", "product_series",
+                        "equipment_model", "identity_source"):
+                if identity.get(key):
+                    doc.metadata.setdefault(key, identity[key])
+    except ImportError:
+        pass  # Resolver not available; keep existing behaviour.
 
     return documents
 
