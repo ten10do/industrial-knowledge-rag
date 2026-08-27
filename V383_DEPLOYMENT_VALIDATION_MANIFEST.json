@@ -1,0 +1,106 @@
+{
+  "manifest_version": "V383_DEPLOYMENT_VALIDATION_MANIFEST_V1",
+  "created_date": "2026-08-27",
+  "source_head": "bde6f169620e8e5305ed601bf4e16a87aebcb443",
+  "source_branch": "main",
+  "validated_operational_overlay": {
+    "reason": "V3.83 validation exposed a missing readiness error/metrics contract; only the operational layer and its regression/tooling changed.",
+    "backend/main.py": "4c93bde22e05ec9f189ad872dce69f0d83f6d1b0b6b4d7b5e813894164566869",
+    "backend/test_v382_production_readiness.py": "95efbcb252287684be1d541576ac9425e8b65f7323f11b5a8cc47df63997f7a3",
+    "scripts/v383_deployment_validation.py": "ca1e9711b3971d482ae7a3fe808ea39f68e155ca6fab9f4075defc7f2868f4a3"
+  },
+  "deployment_topology": "docker_compose_light_backend_with_separately_hosted_frontend",
+  "runtime_config_sha256": "c02727995d8b4e238913d6886f7cfb83a74770cbb6b3ad716500d13faa91b627",
+  "deployment_artifacts": {
+    "Dockerfile": "c657304318a8d05b938d4e721ff0f702b540503f24f3a74131f0f12e275597d4",
+    ".dockerignore": "453b174123b00dd97a709999a4771b2eab54a7625c473715dc0cd38c7d0fd6a7",
+    "compose.yaml": "7f001f43edd7103343a13afb9ee20850967da57b2fbba6f7e29e86abee10cd5a",
+    ".github/workflows/ci.yml": "ff14478976559a4f9057a48763ac632d058b7f5821b43ed7916dee00d5ee7580"
+  },
+  "frozen_research_manifest": {
+    "path": "V382_RESEARCH_FREEZE_MANIFEST.json",
+    "sha256": "9ba84bc51bc270ef2d33fca225d8a1249951b0d179d1f34a6a00225f29469f8e",
+    "protected_files": 28,
+    "baseline_digest": "dcd548906ef2b1f233282283b8684f8c82066dc5eea9f0179ff45a4034a5aa1d"
+  },
+  "protected_runtime_hashes": {
+    "backend/retrieval/evidence.py": "110785fe8d469d09e72aed80020f3d7a72f104be3717db235f274d2627ad3bbe",
+    "backend/retrieval/evidence_support.py": "c54057b2c6e4439872c8708be579ab20038d241b77ecd97adc89da370338e8e0",
+    "backend/retrieval/semantic_judge_localnli.py": "40fe371f594a8a9d63a35c8aa43745dd397def4167781927330a051f2fe4d02e",
+    "backend/retrieval/evidence_contract.py": "8819b595d57b415b687d860df837419abd356b9782b2f382c6a7123cdfeb858d",
+    "backend/retrieval/evidence_querytype.py": "cd2eaa6abc70139d50eb093a34daf32c9856725134073b8b5e453bae098ad4ec",
+    "rag_core.py": "302ea358e005bebb086c1684871218ab3c42da9c34889f8d00eae4c165b89cca",
+    "backend/rag_core.py": "6378c7e16c9519593d5c0ff5f7a18c12c6bf6bb9ac329a261c65c72c5a61fe12",
+    "backend/light_rag_core.py": "2f0804fc6507c0751e2e7acb640652b5c1fa702c4dac4372eb5b8fb6b016da61",
+    "backend/retrieval/candidates.py": "46db6d7c30ed334adee819c68e59ab5232b12405d2c6b0774db2fac37eadf584",
+    "backend/retrieval/fusion.py": "2924b0612f779ce820d318c9fe87a18610589e234afb369cdcf06dc0f2c31cbe",
+    "backend/evaluation/score_lineage.py": "80a5e4d98b38d1dd274b3e76046332aef3255b011264c0e30c768174fa1c7ca1",
+    "backend/retrieval/product_identity.py": "5b438c129310c1b7b4f5484a939db5b14c7d5561689819318e683d88e7458915",
+    "backend/retrieval/identity_reasoning.py": "b8defb4a2987b27eb22536538f49b52c5f77e50d24b788b55ed025b4d0f5a753",
+    "backend/retrieval/document_identity_v373.py": "941f8f9affe0d6497717a32e341182e718a32072a7f079a87bf3e6aa05aecc4d",
+    "backend/retrieval/technical.py": "5c8c22a6757e28ba0f41ca68f944c5f99638a1fd4ea97fe3478f2dedd585926a",
+    "backend/retrieval/filters.py": "ef8202a9ae2ac69a6726db516c9bb898a48c780fd667888817358a17ba2a0b13",
+    "backend/retrieval/scope.py": "07bf2ff8e3213ef2ca14797f9303c0fa6fd4f76e4e375a8d1df6130be732fd58",
+    "backend/retrieval/evidence_table_ownership.py": "32f274276bc1ddf10a0338d312254a85e377db8f03aa3f534c49c56a704c4484",
+    "backend/retrieval/table_context_v362.py": "8291e7fb53e1a6ff9ad73a8c0ab04426581f9888272ea625d73f98848291a2a6",
+    "backend/llm_client.py": "56ee07b0fcc96a22f7211e3e5d13f2ed94003adf8d282a7face1080a62c64900",
+    "backend/evaluation/contract_eval_v367.py": "db838edf3f4bb7b56d7c1f2f48175de0492e55b7050644eb7c21ce71cb01b96d",
+    "v369_real_baseline.py": "5a55eb787b9db5a5ddd214cd3b81e40f3fefa052353b867acafda07142c99491",
+    "backend/evaluation/benchmark_v2_schema.py": "4add838c11aeedef1e35931a5987e0713405c6ece533bd27a03890cc5edea868",
+    "v377_aligned_baseline.py": "6b094ef8532f12b84ee295055373d2b5bac5ed3488f9a1e81c5d757261281455",
+    "v377_build_aligned_benchmark.py": "403651de45460e13c7ff6b628a133b51fca5850e1b859e6e23f90993f520a2a3",
+    "v377_corpus_freeze.py": "59ea7ae1031f1c9075fd0c8450721dc6046cf865815da7753fc1900ad433e4ae",
+    "v377_support_context.py": "08d448e309465615b2953f9d8b17c7bff96c796832676b3d4d6c0439c742b7da",
+    "v377_support_probes.py": "e468bdc35e407b9ba09b74f2a8bb487a021b6088471b1a6d805954307e38b302"
+  },
+  "private_benchmark_hashes": {
+    "corpus": "1c4b2d78cfe5cde01d4cddc419a27f5a28a36a6287e0709c2a23c2283ebf2fe1",
+    "query_text": "a7de41a7db76f160d15b990bb4fba0f3fe772e9f4e7413202299b4f13872d145",
+    "expectation": "7734c28c7470bc94ffb286dfc8dad84cc5de1d4cf57c6c45eace44a8b898bf3a",
+    "support_manifest": "e04b2390f7e802291ecf442b4041963c4cafb3695d73fe5c1d1954fb22158eb5",
+    "slice_manifest": "768909e48281bb69aa9f2635ba566f51d25bf37e2fb3560100781a364c50bc9e",
+    "difficulty": "ec29c7f489d8d27db5e9157227c3a8e3241aaaf9d552ef18c12c0ac356d8a581",
+    "runtime_config": "fbafd02823a0b7f5540c1581c1ccd6876bc2d5c0ea838f878c3bfcdd925b252a"
+  },
+  "index": {
+    "path": "vector_db_v369",
+    "pre_replay_physical_tree_sha256": "69fab91b98ae9e9b41c806f8669f8862e66f2f45290c2b606da7685df46dc3fa",
+    "logical_content_sha256": "644c9dc8f835a48cb2ea5399b8a17eb042d9dac4c71a6a55f3bf147d52d3700b",
+    "logical_chunk_count": 7333,
+    "manifest": null,
+    "note": "Frozen private Chroma index; Chroma mutates chroma.sqlite3 bookkeeping on read-only open, so persistence is gated on canonical logical content rather than unstable physical SQLite bytes. Failure injection must use synthetic indexes only."
+  },
+  "frontend": {
+    "package_lock_sha256": "c93b59bd4c9fcfed609599bf87a4f1c9a1cd48dde5867c12cd4b1f947dde3832",
+    "prevalidation_dist_tree_sha256": "dc5103485ad71f08d770228482cc140214b297bdc70fef54a4e57e0bbc707683"
+  },
+  "dependencies": {
+    "python": "3.11.9",
+    "node": "24.18.0",
+    "npm": "11.16.0",
+    "docker_client": "29.6.2",
+    "docker_compose": "5.3.1",
+    "pip_freeze_sha256": "6d79be09fec73f6d0d58ca92ef29e491d27bb8747a507bfe49d683c13395bacd",
+    "backend_requirements_sha256": "01bbbcb25440a21e22f17fda0f44e957b7b3506db88145ec869aa135c7742548",
+    "full_requirements_sha256": "7162414609ab1d02ad730a012cf32f4e404ac89950c43399d2e68be251302bb0",
+    "packages": {
+      "fastapi": "0.139.2",
+      "uvicorn": "0.51.0",
+      "python-multipart": "0.0.32",
+      "pypdf": "6.14.2",
+      "python-dotenv": "1.2.2",
+      "scikit-learn": "1.9.0",
+      "numpy": "2.4.6",
+      "groq": "1.5.0",
+      "openai": "2.47.0",
+      "boto3": "1.43.67",
+      "redis": "8.1.0",
+      "rq": "2.10.0",
+      "langchain": "1.3.14",
+      "langchain-community": "0.4.2",
+      "langchain-chroma": "1.1.0",
+      "chromadb": "1.5.9",
+      "sentence-transformers": "5.7.0"
+    }
+  }
+}
