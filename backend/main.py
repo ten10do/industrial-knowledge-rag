@@ -75,6 +75,7 @@ if __package__:
     from .observability import (
         METRICS,
         REQUEST_ID_HEADER,
+        dependency_failure,
         new_request_id,
         request_id_from,
         setup_logging,
@@ -120,6 +121,7 @@ else:
     from observability import (
         METRICS,
         REQUEST_ID_HEADER,
+        dependency_failure,
         new_request_id,
         request_id_from,
         setup_logging,
@@ -1681,6 +1683,31 @@ def ready(
     http_status = 200 if report["ready"] else 503
     report["request_id"] = getattr(request.state, "request_id", "")
     report["version"] = app.version
+    if not report["ready"]:
+        failed_required = [
+            check for check in report["checks"]
+            if check["required"] and not check["ok"]
+        ]
+        for check in failed_required:
+            check_name = str(check["check"])
+            dependency = (
+                "index" if check_name.startswith("index_")
+                else "embedding" if check_name == "embedding_stack"
+                else "redis" if check_name.endswith("_redis")
+                else "task_worker" if check_name == "task_worker"
+                else "runtime"
+            )
+            dependency_failure(
+                dependency,
+                check_name.upper()[:48],
+            )
+        message = "服务依赖尚未就绪。"
+        report.update({
+            "error_code": "DEPENDENCY_UNAVAILABLE",
+            "message": message,
+            "detail": message,
+            "retryable": True,
+        })
     logger.info(
         "readiness_evaluated",
         extra={

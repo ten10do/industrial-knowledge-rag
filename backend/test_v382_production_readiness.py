@@ -112,6 +112,36 @@ def test_readiness_fails_for_missing_index_without_leaking_absolute_path(monkeyp
     assert str(tmp_path) not in json.dumps(report)
 
 
+def test_readiness_http_503_uses_safe_error_contract_and_dependency_metric():
+    knowledge_base_id = "kb-v383-missing-00000001"
+    index_path = Path(main.get_index_storage_path(knowledge_base_id))
+    assert not index_path.exists()
+    before = main.METRICS.snapshot()["counters"].get(
+        "dependency_failures_total",
+        [],
+    )
+    before_total = sum(entry["value"] for entry in before)
+
+    response = TestClient(main.app).get(
+        "/ready",
+        headers={
+            "X-Knowledge-Base-ID": knowledge_base_id,
+            REQUEST_ID_HEADER: "req-v383-missing-00000001",
+        },
+    )
+
+    payload = response.json()
+    assert response.status_code == 503
+    assert payload["error_code"] == "DEPENDENCY_UNAVAILABLE"
+    assert payload["request_id"] == "req-v383-missing-00000001"
+    assert payload["retryable"] is True
+    assert payload["message"] == payload["detail"]
+    assert str(index_path.parent) not in response.text
+    after = main.METRICS.snapshot()["counters"]["dependency_failures_total"]
+    assert sum(entry["value"] for entry in after) == before_total + 1
+    assert any(entry["labels"].get("dependency") == "index" for entry in after)
+
+
 def test_readiness_is_degraded_not_failed_when_optional_llm_is_missing(monkeypatch, tmp_path):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
