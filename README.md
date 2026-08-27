@@ -17,7 +17,7 @@
 - 保守识别章节、故障码块、SOP 步骤、参数块和维护内容；普通文档继续使用 fallback chunking。
 - 稳定的 `document_id` / `chunk_id`，以及可供过滤、引用和评测的扁平工业 metadata。
 - `light` 模式：默认使用 BM25 + 字符级 TF-IDF 的 RRF；TF-IDF 仅是 legacy baseline，不将其误称为 embedding vector。
-- `full` 模式：BM25 + HuggingFace Embeddings + Chroma；向量依赖不可用时，服务回退到 light/BM25，而不会伪装为 Full Hybrid。
+- `full` 模式：BM25 + HuggingFace Embeddings + Chroma；缺少必需依赖时启动失败，不会把 light/BM25 伪装为 Full Hybrid。
 - 基于相关性阈值的拒答；答案和来源片段返回 `[S1]` 等引用标记。
 - Groq 或 DeepSeek 生成回答；文档摘要、关键知识、核对问题等辅助输出。
 - 多轮对话上下文压缩、管理 Token、任务队列、版本历史与回滚能力。
@@ -101,7 +101,7 @@ Environment notes:
 
 - `backend/requirements-full.txt` is the authoritative dependency declaration and now installs cleanly with `pip check`.
 - The configured model is cached by HuggingFace outside the repository. Windows may warn when its cache cannot use symlinks; this is a storage-efficiency warning, not a retrieval fallback.
-- Full dependency failure remains safe: startup records requested/effective RAG and retrieval modes and falls back to light/BM25 instead of claiming a dense hybrid run.
+- Full dependency failure remains safe: startup fails fast instead of claiming a dense hybrid run or silently changing runtime mode.
 
 ## 本地运行
 
@@ -123,6 +123,17 @@ npm.cmd run dev
 ```
 
 默认前端地址为 `http://localhost:5173`，后端健康检查为 `http://127.0.0.1:8000/health`。配置 `ADMIN_TOKEN` 后才能上传、构建、发布或回滚知识库。默认 `RAG_MODE=light`；`full` 模式需要 `backend/requirements-full.txt` 的额外依赖和可下载的 embedding 模型。
+
+## V3.82 Production Readiness
+
+生产运维入口为 `/live`（进程存活）、`/ready`（mode-aware required dependency/index gate）和 `/metrics`（低基数、隐私安全的运行指标）。启动配置现在 fail-fast；生产 debug 被拒绝，CORS 仅允许显式 origin，experimental flags 保持默认 OFF。最小 non-root Docker/Compose、public operational smoke、research-freeze/private-artifact guard 和运维文档均在仓库中。
+
+- [Configuration Matrix](CONFIGURATION_MATRIX.md)
+- [Deployment](DEPLOYMENT.md)
+- [Operations Runbook](OPERATIONS_RUNBOOK.md)
+- [Known Limitations](KNOWN_LIMITATIONS.md)
+
+`PUBLIC_CI_GATE` 不需要私有 PDF、私有 index 或外部 API key。`PRIVATE_EVALUATION_GATE` 继续使用本地忽略的 V377 aligned benchmark；公开 synthetic smoke 不能替代它。
 
 ## 配置
 
