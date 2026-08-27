@@ -76,6 +76,18 @@ class MemoryTaskQueue:
         self.state_lock = RLock()
         self.task_locks = {}
 
+    def start(self) -> None:
+        if self.executor is None:
+            self.executor = ThreadPoolExecutor(
+                max_workers=self.max_workers,
+                thread_name_prefix="knowledge-task",
+            )
+
+    def close(self) -> None:
+        if self.executor is not None:
+            self.executor.shutdown(wait=True, cancel_futures=False)
+            self.executor = None
+
     def _copy(self, record):
         return {
             **record,
@@ -546,6 +558,16 @@ class RedisTaskQueue:
 
     def publish_event(self, channel: str, value: str) -> None:
         self.redis.publish(channel, value)
+
+    def start(self) -> None:
+        return None
+
+    def close(self) -> None:
+        close = getattr(self.redis, "close", None)
+        if callable(close):
+            close()
+        else:
+            self.redis.connection_pool.disconnect()
 
     def listen_events(self, channel: str, stop_event, callback) -> None:
         pubsub = self.redis.pubsub(ignore_subscribe_messages=True)

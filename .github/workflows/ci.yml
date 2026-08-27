@@ -40,8 +40,14 @@ jobs:
       - name: Check Python syntax
         run: python -m compileall -q backend
 
+      - name: Verify research freeze and private-artifact boundary
+        run: python -m backend.v382_release_guard
+
       - name: Run backend tests
         run: python -m pytest backend -v
+
+      - name: Run public operational smoke
+        run: python scripts/v382_public_smoke.py
 
       - name: Run offline RAG evaluation
         run: python -m backend.evaluation.run
@@ -96,3 +102,16 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+  container:
+    name: Container Configuration and Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build non-root backend image
+        run: docker build --tag industrial-knowledge-rag:ci .

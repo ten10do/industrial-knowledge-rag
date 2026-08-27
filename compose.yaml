@@ -1,0 +1,38 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      RUNTIME_ENV: production
+      APP_DEBUG: "false"
+      LOG_FORMAT: json
+      RAG_MODE: light
+      RETRIEVAL_MODE: hybrid
+      TASK_QUEUE_BACKEND: memory
+      RATE_LIMIT_BACKEND: memory
+      PUBLIC_KNOWLEDGE_BASE_ID: kb-public-shared-00000001
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:5173}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+    ports:
+      - "8000:8000"
+    volumes:
+      - rag_data:/app/backend/data
+      - rag_light_indexes:/app/backend/light_indexes
+      - rag_public_versions:/app/backend/public_versions
+      - rag_runtime_state:/app/backend/runtime_state
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/live', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  rag_data:
+  rag_light_indexes:
+  rag_public_versions:
+  rag_runtime_state:

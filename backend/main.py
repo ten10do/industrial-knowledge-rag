@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import shutil
+import time
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,9 +20,28 @@ from fastapi import (
     Request,
     UploadFile,
 )
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from pypdf import PdfReader
+
+if __package__:
+    from .runtime_config import (
+        app_debug_enabled,
+        runtime_environment,
+        validate_runtime_environment,
+    )
+else:
+    from runtime_config import (  # type: ignore
+        app_debug_enabled,
+        runtime_environment,
+        validate_runtime_environment,
+    )
+
+RUNTIME_CONFIG_WARNINGS = validate_runtime_environment()
+RUNTIME_ENV = runtime_environment()
+APP_DEBUG = app_debug_enabled()
 
 if __package__:
     from .conversation.context_manager import ConversationContextManager
@@ -52,6 +72,14 @@ if __package__:
     from .retrieval import get_reranker, support_gate_enabled, validate_evidence_support
     from .task_queue import create_job_id, create_task_queue
     from .version_sync import PublicVersionSynchronizer
+    from .observability import (
+        METRICS,
+        REQUEST_ID_HEADER,
+        new_request_id,
+        request_id_from,
+        setup_logging,
+    )
+    from .readiness import evaluate_readiness
     from .version_store import (
         create_pdf_bundle,
         create_version_store,
@@ -89,6 +117,14 @@ else:
     from retrieval import get_reranker, support_gate_enabled, validate_evidence_support
     from task_queue import create_job_id, create_task_queue
     from version_sync import PublicVersionSynchronizer
+    from observability import (
+        METRICS,
+        REQUEST_ID_HEADER,
+        new_request_id,
+        request_id_from,
+        setup_logging,
+    )
+    from readiness import evaluate_readiness
     from version_store import (
         create_pdf_bundle,
         create_version_store,
@@ -119,11 +155,10 @@ try:
 except ModuleNotFoundError as exc:
     if RAG_MODE != "full":
         raise
-    RAG_MODE = "light"
-    RAG_BACKEND_NAME = "light_rag_core"
-    RAG_MODE_FALLBACK_REASON = f"Full dependencies unavailable: {exc.name}"
-    os.environ["RETRIEVAL_MODE"] = "lexical"
-    rag_backend = _load_rag_backend(RAG_BACKEND_NAME)
+    raise RuntimeError(
+        "RAG_MODE=full requires backend/requirements-full.txt; "
+        f"missing dependency: {exc.name}."
+    ) from exc
 
 EFFECTIVE_RAG_MODE = RAG_MODE
 EFFECTIVE_RETRIEVAL_MODE = os.getenv(
@@ -162,6 +197,12 @@ reranker = get_reranker()
 ModelProvider = Literal["Groq", "DeepSeek"]
 knowledge_base_locks = tuple(Lock() for _ in range(64))
 logger = logging.getLogger(__name__)
+try:
+    setup_logging()
+except Exception:  # observability must never break startup
+    pass
+for runtime_warning in RUNTIME_CONFIG_WARNINGS:
+    logger.warning("runtime_config_warning", extra={"check": runtime_warning})
 KNOWLEDGE_BASE_ID_PATTERN = re.compile(r"^kb-[A-Za-z0-9_-]{16,64}$")
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 
@@ -203,6 +244,8 @@ PUBLIC_VERSION_EVENT_CHANNEL = os.getenv(
 ).strip() or "industrial-knowledge-rag:public-version-changed"
 RATE_LIMITS = {
     "health": (positive_int_env("HEALTH_RATE_LIMIT", 120), 60),
+    "ready": (positive_int_env("READY_RATE_LIMIT", 120), 60),
+    "metrics": (positive_int_env("METRICS_RATE_LIMIT", 60), 60),
     "ask": (positive_int_env("ASK_RATE_LIMIT", 30), 60),
     "study": (positive_int_env("STUDY_RATE_LIMIT", 10), 3600),
     "upload": (positive_int_env("UPLOAD_RATE_LIMIT", 5), 3600),
@@ -260,11 +303,17 @@ def get_allowed_origins():
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    start_queue = getattr(task_queue, "start", None)
+    if callable(start_queue):
+        start_queue()
     public_version_synchronizer.start()
     try:
         yield
     finally:
         public_version_synchronizer.stop()
+        close_queue = getattr(task_queue, "close", None)
+        if callable(close_queue):
+            close_queue()
 
 
 app = FastAPI(
@@ -272,11 +321,16 @@ app = FastAPI(
     version="1.1.0",
     description="面向工业技术文档的 RAG 检索、问答与知识辅助后端。",
     lifespan=lifespan,
+    debug=APP_DEBUG,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=get_allowed_origins(),
+    allow_origins=(get_allowed_origins() if RUNTIME_ENV != "production" else (
+        [os.getenv("FRONTEND_ORIGIN", "").strip()]
+        if os.getenv("FRONTEND_ORIGIN", "").strip()
+        else []
+    )),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -307,6 +361,156 @@ async def add_governance_headers(request: Request, call_next):
     ).items():
         response.headers[name] = str(value)
     return response
+
+
+def _route_label(request: Request) -> str:
+    route = request.scope.get("route")
+    template = getattr(route, "path", None)
+    return template if template else "unmatched"
+
+
+@app.middleware("http")
+async def observability_middleware(request: Request, call_next):
+    request_id = request_id_from(request.headers.get(REQUEST_ID_HEADER)) or new_request_id()
+    request.state.request_id = request_id
+    started = time.perf_counter()
+    status_code = 500
+    error_code = ""
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        error_code = getattr(request.state, "error_code", "")
+        response.headers[REQUEST_ID_HEADER] = request_id
+        response.headers["X-Runtime-Mode"] = EFFECTIVE_RAG_MODE
+        return response
+    except HTTPException as exc:
+        status_code = exc.status_code
+        error_code = _error_code_for_status(exc.status_code, exc.detail)
+        raise
+    except Exception as exc:
+        error_code = type(exc).__name__.upper()[:48]
+        logger.error(
+            "request_unhandled_exception",
+            extra={
+                "request_id": request_id,
+                "endpoint": _route_label(request),
+                "runtime_mode": EFFECTIVE_RAG_MODE,
+                "status_code": 500,
+                "error_code": error_code,
+            },
+        )
+        raise
+    finally:
+        latency_ms = (time.perf_counter() - started) * 1000.0
+        code_class = f"{status_code // 100}xx"
+        try:
+            METRICS.inc("http_requests_total", {
+                "endpoint": _route_label(request),
+                "code_class": code_class,
+            })
+            if status_code >= 400:
+                METRICS.inc("http_request_errors_total", {
+                    "endpoint": _route_label(request),
+                    "error_code": error_code or f"HTTP_{status_code}",
+                })
+            METRICS.observe_latency(
+                "http_request_latency_ms",
+                latency_ms,
+                {"endpoint": _route_label(request)},
+            )
+            logger.info(
+                "request_completed",
+                extra={
+                    "request_id": request_id,
+                    "endpoint": _route_label(request),
+                    "runtime_mode": EFFECTIVE_RAG_MODE,
+                    "status_code": status_code,
+                    "latency_ms": round(latency_ms, 1),
+                    **({"error_code": error_code} if error_code else {}),
+                },
+            )
+        except Exception:
+            pass
+
+
+_STATUS_CODE_NAMES = {
+    400: "INVALID_REQUEST",
+    401: "UNAUTHORIZED",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    409: "CONFLICT",
+    413: "PAYLOAD_TOO_LARGE",
+    422: "VALIDATION_ERROR",
+    429: "RATE_LIMITED",
+}
+
+
+def _error_code_for_status(status_code: int, detail) -> str:
+    if isinstance(detail, str) and detail.isascii() and "_" in detail and len(detail) <= 64:
+        return detail
+    return _STATUS_CODE_NAMES.get(status_code, f"HTTP_{status_code}")
+
+
+@app.exception_handler(HTTPException)
+async def structured_http_exception_handler(request: Request, exc: HTTPException):
+    request_id = getattr(request.state, "request_id", "") or new_request_id()
+    headers = dict(getattr(exc, "headers", None) or {})
+    headers.setdefault(REQUEST_ID_HEADER, request_id)
+    message = exc.detail if isinstance(exc.detail, str) else "请求处理失败。"
+    retryable = exc.status_code == 429 or exc.status_code >= 500
+    payload = {
+        "error_code": _error_code_for_status(exc.status_code, exc.detail),
+        "message": message,
+        "detail": message,  # backward-compatible field for existing clients
+        "request_id": request_id,
+        "retryable": retryable,
+    }
+    request.state.error_code = payload["error_code"]
+    return JSONResponse(status_code=exc.status_code, content=payload, headers=headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def safe_validation_error_handler(request: Request, exc: RequestValidationError):
+    request_id = getattr(request.state, "request_id", "") or new_request_id()
+    # Privacy: only location + error TYPE are echoed - never the offending input.
+    safe_errors = [
+        {"loc": [str(part) for part in error.get("loc", [])], "type": str(error.get("type", ""))}
+        for error in list(exc.errors())[:20]
+    ]
+    payload = {
+        "error_code": "VALIDATION_ERROR",
+        "message": "请求参数校验失败。",
+        "detail": "请求参数校验失败。",
+        "errors": safe_errors,
+        "request_id": request_id,
+        "retryable": False,
+    }
+    request.state.error_code = payload["error_code"]
+    return JSONResponse(status_code=422, content=payload)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    request_id = getattr(request.state, "request_id", "") or new_request_id()
+    logger.error(
+        "request_internal_error",
+        extra={
+            "request_id": request_id,
+            "endpoint": _route_label(request),
+            "runtime_mode": EFFECTIVE_RAG_MODE,
+            "status_code": 500,
+            "error_code": type(exc).__name__.upper()[:48],
+        },
+    )
+    payload = {
+        "error_code": "INTERNAL_ERROR",
+        "message": "服务器内部错误。",
+        "detail": "服务器内部错误。",
+        "request_id": request_id,
+        "retryable": True,
+    }
+    request.state.error_code = payload["error_code"]
+    return JSONResponse(status_code=500, content=payload)
 
 
 class AskRequest(BaseModel):
@@ -752,7 +956,7 @@ def log_task_submission(record: dict, created: bool) -> None:
             "scope": record.get("scope", ""),
             "trace_id": record.get("trace_id", ""),
             "attempt": record.get("attempt", 1),
-            "created": created,
+            "created_new": created,
         },
     )
 
@@ -1452,6 +1656,76 @@ def health(
     return response
 
 
+@app.get("/live")
+def live(request: Request):
+    """Process-only liveness; dependency failures never change this response."""
+    return {
+        "status": "ok",
+        "runtime_mode": EFFECTIVE_RAG_MODE,
+        "version": app.version,
+    }
+
+
+@app.get("/ready")
+def ready(
+    request: Request,
+    knowledge_base_id: str = Depends(require_knowledge_base_id),
+):
+    """Mode-aware readiness. 200 only when all REQUIRED dependencies pass."""
+    report = evaluate_readiness(
+        effective_rag_mode=EFFECTIVE_RAG_MODE,
+        knowledge_base_id=knowledge_base_id,
+        get_index_storage_path=get_index_storage_path,
+        task_queue_health=task_queue.health,
+    )
+    http_status = 200 if report["ready"] else 503
+    report["request_id"] = getattr(request.state, "request_id", "")
+    report["version"] = app.version
+    logger.info(
+        "readiness_evaluated",
+        extra={
+            "endpoint": "/ready",
+            "runtime_mode": EFFECTIVE_RAG_MODE,
+            "status_code": http_status,
+            "check": report["status"],
+        },
+    )
+    return JSONResponse(status_code=http_status, content=report)
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def metrics_endpoint(request: Request):
+    """Low-cardinality operational metrics in Prometheus text format.
+
+    Contains NO query text, document/chunk text, identifiers, secrets, or local paths.
+    """
+    enforce_rate_limit(request, PUBLIC_KNOWLEDGE_BASE_ID, "metrics")
+    try:
+        queue_health = task_queue.health()
+        queue_metrics = task_queue.metrics(scope=PUBLIC_KNOWLEDGE_BASE_ID)
+        METRICS.set_gauge("queue_running_jobs", queue_health.get("running_jobs", 0))
+        METRICS.set_gauge(
+            "queue_failed_jobs",
+            queue_metrics.get("status_counts", {}).get("failed", 0),
+        )
+        METRICS.set_gauge(
+            "queue_depth",
+            sum(
+                queue_metrics.get("status_counts", {}).get(status, 0)
+                for status in ("pending", "running")
+            ),
+        )
+    except Exception as exc:
+        METRICS.inc(
+            "dependency_failures_total",
+            {"dependency": "task_queue", "error_code": type(exc).__name__.upper()[:48]},
+        )
+    return PlainTextResponse(
+        METRICS.render_prometheus(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
 @app.post(
     "/upload",
     response_model=JobSubmissionResponse,
@@ -1479,6 +1753,7 @@ def upload(
                 scope=knowledge_base_id,
                 idempotency_key=idempotency_key,
                 job_id=job_id,
+                trace_id=getattr(request.state, "request_id", ""),
             )
         except Exception:
             version_store.delete_task_input(job_id)
@@ -1491,6 +1766,20 @@ def upload(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail="知识库构建失败。") from exc
+
+
+def _log_ask_outcome(http_request: Request, decision: str, reason_family: str) -> None:
+    logger.info(
+        "ask_outcome",
+        extra={
+            "request_id": getattr(http_request.state, "request_id", ""),
+            "endpoint": "/ask",
+            "runtime_mode": EFFECTIVE_RAG_MODE,
+            "status_code": 200,
+            "decision": decision,
+            "reason_family": reason_family,
+        },
+    )
 
 
 @app.post(
@@ -1540,7 +1829,13 @@ def ask(
             }
             if request.retrieval_mode:
                 retrieval_arguments["retrieval_mode"] = request.retrieval_mode
+            retrieval_started = time.perf_counter()
             raw_docs = retrieve_docs(context_result.standalone_query, **retrieval_arguments)
+            METRICS.observe_latency(
+                "retrieval_latency_ms",
+                (time.perf_counter() - retrieval_started) * 1000.0,
+                {"mode": EFFECTIVE_RETRIEVAL_MODE},
+            )
 
         docs = filter_relevant_docs(raw_docs)
         section_status = (
@@ -1550,12 +1845,21 @@ def ask(
         sources = serialize_sources(docs)
         evidence = None
         if hasattr(raw_docs, "candidates"):
+            evidence_started = time.perf_counter()
             evidence = analyze_evidence(
                 context_result.standalone_query,
                 raw_docs,
                 request.retrieval_mode,
             )
+            METRICS.observe_latency(
+                "evidence_latency_ms",
+                (time.perf_counter() - evidence_started) * 1000.0,
+                {"mode": EFFECTIVE_RETRIEVAL_MODE},
+            )
             if evidence.decision == "ABSTAIN":
+                METRICS.inc("rag_answers_total", {"decision": "EVIDENCE_ABSTAIN"})
+                METRICS.inc("rag_abstains_total", {"reason_family": "EVIDENCE_ABSTAIN"})
+                _log_ask_outcome(http_request, "ABSTAIN", "EVIDENCE_ABSTAIN")
                 reranker_status = None
                 if reranker.requested:
                     reranker_status = {
@@ -1576,6 +1880,9 @@ def ask(
                     conversation_context=context_metadata,
                 )
         if not has_relevant_docs(docs):
+            METRICS.inc("rag_answers_total", {"decision": "FILTER_ABSTAIN"})
+            METRICS.inc("rag_abstains_total", {"reason_family": "NO_RELEVANT_DOCS"})
+            _log_ask_outcome(http_request, "ABSTAIN", "NO_RELEVANT_DOCS")
             return AskResponse(
                 answer=REFUSAL_MESSAGE,
                 sources=sources,
@@ -1604,6 +1911,9 @@ def ask(
                 getattr(raw_docs, "corpus_documents", []),
             )
             if support.status == "INSUFFICIENT":
+                METRICS.inc("rag_answers_total", {"decision": "SUPPORT_ABSTAIN"})
+                METRICS.inc("rag_abstains_total", {"reason_family": "SUPPORT_INSUFFICIENT"})
+                _log_ask_outcome(http_request, "ABSTAIN", "SUPPORT_INSUFFICIENT")
                 return AskResponse(
                     answer=SUPPORT_REFUSAL_MESSAGE,
                     sources=[],
@@ -1631,6 +1941,8 @@ def ask(
                 docs,
                 provider=request.model_provider,
             )
+        METRICS.inc("rag_answers_total", {"decision": "ANSWER"})
+        _log_ask_outcome(http_request, "ANSWER", "")
         return AskResponse(
             answer=answer,
             sources=sources,
@@ -1734,6 +2046,7 @@ def publish(
             {"knowledge_base_id": knowledge_base_id},
             scope=knowledge_base_id,
             idempotency_key=idempotency_key,
+            trace_id=getattr(request.state, "request_id", ""),
         )
         log_task_submission(record, created)
         return job_submission_response(record)
@@ -1768,7 +2081,10 @@ def versions(
         ]
         return VersionListResponse(versions=items)
     except ValueError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=500,
+            detail="知识库版本历史读取失败。",
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=500,
@@ -1796,6 +2112,7 @@ def rollback_version(
             {"version_id": version_id},
             scope=knowledge_base_id,
             idempotency_key=idempotency_key,
+            trace_id=getattr(request.state, "request_id", ""),
         )
         log_task_submission(record, created)
         return job_submission_response(record)
@@ -1866,7 +2183,7 @@ def retry_job(
                 "job_id": record["job_id"],
                 "retry_of": job_id,
                 "trace_id": record.get("trace_id", ""),
-                "created": created,
+                "created_new": created,
             },
         )
         return job_submission_response(record)
