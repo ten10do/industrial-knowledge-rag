@@ -1,4 +1,4 @@
-# Operations Runbook — V3.82
+# Operations Runbook — V3.83
 
 ## Install and start
 
@@ -42,6 +42,7 @@ Invoke-WebRequest http://127.0.0.1:8000/metrics
 - `/live`: process-only liveness. Dependency/provider failures do not make it fail.
 - `/health`: legacy dashboard health and version-governance detail; HTTP 200 can be `degraded`.
 - `/ready`: mode-aware required dependency and index integrity gate. HTTP 503 means do not route query traffic.
+- A 503 `/ready` body includes `DEPENDENCY_UNAVAILABLE`, a request ID, safe check details, and `retryable=true`; it increments `dependency_failures_total` with bounded labels.
 - `/metrics`: low-cardinality Prometheus text. It contains request/error counts, request/retrieval/Evidence latency, answer/abstain counts, abstain families, dependency failures, and queue gauges.
 
 Never add query, chunk text, path, request ID, chunk ID, or query hashes as metric labels.
@@ -93,7 +94,11 @@ When present, all fields are mandatory and enforced. Legacy full indexes without
 .\venv\Scripts\python.exe -m backend.v382_release_guard
 ```
 
-These public gates use a synthetic tiny index and no private corpus or API key.
+These public gates use a synthetic tiny index and no private corpus or API key. The bounded V3.83 real-process lifecycle/load/soak validator is operator-invoked and intentionally excluded from ordinary pytest:
+
+```powershell
+.\venv\Scripts\python.exe scripts\v383_deployment_validation.py --soak-seconds 600
+```
 
 ## Rollback
 

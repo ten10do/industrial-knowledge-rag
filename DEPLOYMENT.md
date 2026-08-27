@@ -1,4 +1,4 @@
-# Deployment — V3.82
+# Deployment — V3.83
 
 ## Supported topology
 
@@ -42,6 +42,8 @@ Private PDFs, benchmarks, `.env`, vector databases, results, `.git`, and model c
 
 Container health uses `/live`. Traffic routing must additionally require `/ready` for the target knowledge-base ID. A `degraded` 200 is routable when only optional providers or legacy-manifest warnings are present. An `unavailable` 503 is not routable.
 
+An unavailable `/ready` response follows the safe operational error contract (`error_code=DEPENDENCY_UNAVAILABLE`, `message`, `request_id`, `retryable=true`) while retaining the per-check readiness details. Each failed required check also increments the low-cardinality dependency-failure metric.
+
 ## Persistence and permissions
 
 The image runs as the `app` system user. Ensure bind mounts are writable by that UID/group or use named volumes. Persist indexes and version stores across restarts. Index replace/build operations use staging and atomic replacement where supported; do not share a writable local index between unrelated releases without an operator-controlled version boundary.
@@ -56,4 +58,4 @@ See `CONFIGURATION_MATRIX.md`. Use the deployment platform's secret store for `A
 
 `PRIVATE_EVALUATION_GATE` is local and ignored by Git. It owns the V377 aligned corpus replay and must remain exactly 54 correct / 9 false answers / 3 false refusals with hard negatives 10/10. Public synthetic tests cannot replace that gate.
 
-This is a development-ready production baseline, not a claim of Kubernetes hardening, multi-region failover, or a long-duration soak. Those lifecycle validations belong to V3.83.
+V3.83 validated the native production-like process lifecycle, restart/persistence, safe failure/recovery, observability, frontend/API connectivity, bounded load, and a 10-minute soak. The supported release topology is still Docker Compose; image build and container lifecycle remain unvalidated until a Docker daemon is available. This is not a claim of Kubernetes hardening or multi-region failover.

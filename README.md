@@ -124,9 +124,9 @@ npm.cmd run dev
 
 默认前端地址为 `http://localhost:5173`，后端健康检查为 `http://127.0.0.1:8000/health`。配置 `ADMIN_TOKEN` 后才能上传、构建、发布或回滚知识库。默认 `RAG_MODE=light`；`full` 模式需要 `backend/requirements-full.txt` 的额外依赖和可下载的 embedding 模型。
 
-## V3.82 Production Readiness
+## V3.83 Deployment Validation
 
-生产运维入口为 `/live`（进程存活）、`/ready`（mode-aware required dependency/index gate）和 `/metrics`（低基数、隐私安全的运行指标）。启动配置现在 fail-fast；生产 debug 被拒绝，CORS 仅允许显式 origin，experimental flags 保持默认 OFF。最小 non-root Docker/Compose、public operational smoke、research-freeze/private-artifact guard 和运维文档均在仓库中。
+生产运维入口为 `/live`（进程存活）、`/ready`（mode-aware required dependency/index gate）和 `/metrics`（低基数、隐私安全的运行指标）。启动配置 fail-fast；生产 debug 被拒绝，CORS 仅允许显式 origin，experimental flags 保持默认 OFF。V3.83 已完成 native production-like lifecycle、failure/recovery、10-minute soak 与 load 验证；正式 Docker/Compose topology 的 image/container validation 仍因本机 daemon 不可用而处于 PARTIAL 状态。
 
 - [Configuration Matrix](CONFIGURATION_MATRIX.md)
 - [Deployment](DEPLOYMENT.md)

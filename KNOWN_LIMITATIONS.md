@@ -1,4 +1,4 @@
-# Known Limitations — V3.82
+# Known Limitations — V3.83
 
 These limitations are release facts, not hidden backlog.
 
@@ -22,11 +22,14 @@ These limitations are release facts, not hidden backlog.
 
 `LAYOUT_AWARE_INGESTION_REBUILD` is `DEFERRED_RESEARCH_BACKLOG` and `NOT_PART_OF_CURRENT_RELEASE`.
 
-A future phase requires layout-aware PDF parsing; explicit rows, columns, headers, merged cells and cell provenance; structure-aware chunks; a rebuilt corpus; a new benchmark; and new safety gates. V3.82 intentionally does not implement that research.
+A future phase requires layout-aware PDF parsing; explicit rows, columns, headers, merged cells and cell provenance; structure-aware chunks; a rebuilt corpus; a new benchmark; and new safety gates. V3.83 intentionally does not implement that research.
 
 ## Operational boundary
 
-- V3.82 is a development-ready production-readiness baseline, not a claim of Kubernetes, multi-region, or long-soak production certification.
+- The native production-like lifecycle and 10-minute soak passed, but the formal Docker Compose release topology has not completed image-build or container-lifecycle validation because the local Docker daemon is unavailable.
+- CI workflow configuration is valid, but this repository has no configured Git remote and the V3.83 commits were not pushed; `CI_EXECUTED_PASS` is therefore not claimed.
+- No runtime-parseable Groq or DeepSeek key was available. Optional-provider degradation and safe failure passed, but a real successful generation and its `ANSWER` metric were not validated.
+- V3.83 is not a claim of Kubernetes or multi-region certification.
 - In-process metrics reset on process restart. External scraping/persistence is an operator responsibility.
 - Memory queue/rate-limit backends are single-process. Multi-process deployments require Redis and live workers.
 - Provider readiness checks validate configuration, not a billable remote completion. Real Groq/DeepSeek availability is reported only when a request is attempted.
