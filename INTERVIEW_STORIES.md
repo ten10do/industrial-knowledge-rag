@@ -2,6 +2,17 @@
 
 These stories are phrased as evidence-backed talking points. They should be adapted to the speaker's real role and never presented as team or production impact beyond what the repository proves.
 
+## Story matrix
+
+| Case | Context/problem | Evidence | Decision | Trade-off | Result |
+|---|---|---|---|---|---|
+| Evaluator defect | 21 apparent false answers | 19 mapped to a missing adapter field | fix measurement, freeze runtime | delayed tuning | runtime was not blamed for evaluator error |
+| Score lineage | threshold looked responsible for refusals | vector_score was None in the harness; production wired it | repair lineage only | no threshold gain claimed | 69/69 fidelity, five honest recoveries, delta FA=0 |
+| Corpus alignment | unsupported questions counted as FR | source audit preserved 69 query texts | rebuild expectations prediction-blind | historical labels changed | 26 supported-answer/43 abstainable |
+| Safety NO-GO | candidate veto could block FAs | it killed at least 13 correct answers | STOP | retain disclosed residual FA | zero unsafe runtime change |
+| Table representation | flat text could not bind rows/columns | real-manual structure gates failed | ownership authority NONE | defer useful table cases | layout-aware ingestion isolated as future project |
+| Container closure | native path passed but image was unexecuted | real image audit and lifecycle gates | remain partial until Docker ran | slower release | restart/shutdown 3/3, persistence/recreation PASS |
+
 ## Story 1 — the evaluator was the bug
 
 **Situation:** A benchmark reported 21 false answers, suggesting a serious Evidence-runtime regression.

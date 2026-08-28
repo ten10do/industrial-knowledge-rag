@@ -19,6 +19,8 @@ os.environ.update({
     "RETRIEVAL_MODE": "hybrid",
     "TASK_QUEUE_BACKEND": "memory",
     "RATE_LIMIT_BACKEND": "memory",
+    "GROQ_API_KEY": "",
+    "DEEPSEEK_API_KEY": "",
     "RERANK_ENABLED": "false",
     "SECTION_EXPANSION_ENABLED": "false",
     "SUPPORT_GATE_ENABLED": "false",

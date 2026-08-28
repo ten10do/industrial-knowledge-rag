@@ -8,6 +8,7 @@ This document records the decisions that define the V3.84 freeze. A failed exper
 |---|---|---|---|
 | V3.65–V3.67 | Can prose-oriented evaluation be trusted? | Legacy evaluator false-accepted 88% of mutations; contract-native 151-case authority suite reached 0% FA | Use V3.67 structured evaluator as authority |
 | V3.70–V3.71 | Were 19 reported false answers runtime defects? | Adapter read a non-existent requirements_covered field instead of sufficient and omitted covered keys | Correct evaluator adapter; do not tune Evidence for evaluator defects |
+| V3.72–V3.74 | Was identity reasoning failing, or was identity metadata missing? | Metadata lineage/enrichment restored the in-corpus model to EXACT_MODEL while absent models remained absent | Fix producer/consumer lineage; do not invent corpus identities |
 | V3.75–V3.76 | Should the vector threshold be retuned? | Harness failed to propagate vector_score; real score lineage was restored 69/69 with threshold unchanged | Fix lineage fidelity, do not disguise wiring defects as calibration |
 | V3.77 | Did benchmark gold match the actual corpus? | 18 ANSWER expectations lacked corpus support; query text remained 69/69 unchanged | Rebuild expectations prediction-blind and freeze aligned V2 |
 | V3.78 | Can a simple abstention boundary remove unsafe answers? | Candidate vetoes killed 13 or more correct answers while failing utility gates | NO-GO; no runtime change |

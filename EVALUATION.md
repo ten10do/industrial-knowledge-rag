@@ -6,6 +6,18 @@ The current authority is the V3.67 contract-native evaluator running against V37
 
 V3.65 demonstrated why this matters: the legacy evaluator accepted 7 of 8 adversarial mutations, an 88% false-accept rate. The typed replacement reduced that to 1 of 8. V3.67 then established a 151-case authority suite with 0% false accepts.
 
+FORMAL_EVIDENCE_GATE_AUTHORITY = CONTRACT_NATIVE_V367.
+
+## Decision vocabulary
+
+- ANSWER — the frozen Evidence contract authorizes approved candidates for downstream generation.
+- ABSTAIN — the Evidence contract refuses; the API returns no supporting sources and skips generation.
+- False answer (FA) — runtime ANSWER when the aligned expectation is ABSTAIN, including unsupported or out-of-domain cases.
+- False refusal (FR) — runtime ABSTAIN only when the aligned corpus actually supports an ANSWER. An unsupported query is never counted as an FR.
+- CORPUS_UNSUPPORTED — the requested claim is absent from the frozen corpus; correct behavior is normally ABSTAIN.
+- OOD — the query is outside the knowledge-base domain or supported scope; correct behavior is ABSTAIN.
+- Hard negative — a deliberately confusable identifier, identity or scope case that should still ABSTAIN.
+
 ## Evaluation layers
 
 | Layer | Data | Purpose | May support a production-quality claim? |

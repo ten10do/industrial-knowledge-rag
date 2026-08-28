@@ -61,6 +61,26 @@ Publishing is versioned. A new index is built as a draft, validated, then activa
 
 RRF scores rank candidates; they are not probabilities and do not by themselves authorize an answer. The frozen Evidence policy uses explicit identifiers, equipment identity, evidence-contract coverage, source scores and safety checks.
 
+Four invariants prevent responsibility drift:
+
+- retrieval relevance is not an Evidence decision;
+- contract completeness is not evidence truth;
+- formal evaluation authority is not a natural-language lexical judge;
+- an optional LLM is not safety authority;
+- flat table text is not cell-ownership proof.
+
+The evaluation flow is:
+
+    Query -> Retrieval -> Identity -> Evidence Contract -> ANSWER / ABSTAIN
+                                                        |
+                                                        +-> approved context -> optional generation
+
+    Structured runtime record + frozen expectation
+      -> V3.67 contract-native evaluator
+      -> decision/claim/identity/scope verdict
+
+Natural-language surface similarity is not the formal verdict authority.
+
 ## Operational architecture
 
 - /live reports process liveness only.
@@ -70,6 +90,12 @@ RRF scores rank candidates; they are not probabilities and do not by themselves 
 - Management endpoints require ADMIN_TOKEN.
 - Production JSON logging uses allowlisted fields and propagates a request ID.
 - The Docker image runs as uid 100, excludes offline/test/private assets, and persists runtime state through named volumes.
+
+Operational request flow:
+
+    request -> request ID -> validation/rate limit -> retrieval/Evidence
+            -> bounded logs + metrics -> stable response/error contract
+            -> /live and /ready expose process/dependency state
 
 ## Frozen and experimental surfaces
 
