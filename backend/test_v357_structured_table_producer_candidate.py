@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
 import pytest
 from pypdf import PdfReader
@@ -196,10 +197,16 @@ def test_gate_evaluation_thresholds():
 
 
 def test_real_manual_page_analysis_runs_and_is_deterministic():
-    pdf_path = (
-        r"D:\industrial-knowledge-rag\backend\evaluation\benchmark_private"
-        r"\v357_candidate\documents\danfoss-fc51-doc.pdf"
+    private_documents = (
+        Path(__file__).resolve().parent
+        / "evaluation"
+        / "benchmark_private"
+        / "v357_candidate"
+        / "documents"
     )
+    pdf_path = next(iter(sorted(private_documents.glob("*.pdf"))), None)
+    if pdf_path is None:
+        pytest.skip("private candidate document not present")
     try:
         reader = PdfReader(pdf_path)
     except Exception:  # pragma: no cover - document must exist in private store

@@ -11,13 +11,16 @@ The project is intentionally evidence-first. Retrieval proposes candidate passag
 | Area | Current evidence |
 |---|---|
 | Correctness authority | V377 aligned private benchmark, contract-native V3.67 evaluator |
-| Frozen result | 54/69 correct, 9 false answers, 3 false refusals, 78.26% accuracy |
+| Frozen result | 54/69 correct, 9 false answers, 3 false refusals, 78.26% accuracy; AR 76.92%, AbR 79.07% |
 | Safety slice | 10/10 hard negatives handled correctly |
 | Regression suite | 948 backend tests passed, 2 skipped; 34/34 frontend tests passed; frontend build passed |
 | Deployment | Docker Compose image, non-root runtime, readiness, restart, persistence, recreation, shutdown, load and privacy gates passed |
 | Long-run stability | 600.12-second native soak, 11,678 requests, 0 errors |
+| Freeze/private boundary | 28/28 protected hashes passed; tracked private files: 0 |
 
 These are engineering validation results, not a production-accuracy claim. The correctness benchmark uses a local, ignored three-document corpus; its documents and annotations are not published. Public fixtures validate reproducibility and behavior contracts, not private-benchmark quality.
+
+Read [Known Limitations](KNOWN_LIMITATIONS.md) before interpreting the metrics, or continue with the [Quick Start](#quick-start).
 
 ## Why this project exists
 
@@ -81,7 +84,7 @@ Management operations require ADMIN_TOKEN. A generation provider is optional: wi
     docker compose build
     docker compose up -d
     Invoke-RestMethod http://127.0.0.1:8000/live
-    Invoke-RestMethod http://127.0.0.1:8000/ready
+    Invoke-RestMethod http://127.0.0.1:8000/ready -Headers @{'X-Knowledge-Base-ID'='kb-public-shared-00000001'}
 
 Stop containers while retaining named volumes:
 
@@ -143,6 +146,14 @@ The container image excludes tests, offline evaluation assets, local results, PD
 - [Release Checklist](RELEASE_CHECKLIST.md)
 - [Known Limitations](KNOWN_LIMITATIONS.md)
 - [Historical Research Index](docs/research/README.md)
+
+## If you only have 5 minutes
+
+1. Read [Architecture](ARCHITECTURE.md) for the system and safety boundary.
+2. Read [Evaluation](EVALUATION.md) for the 54/69 baseline and benchmark validity.
+3. Read [Deployment Validation](DEPLOYMENT_VALIDATION.md) for the executed RC evidence.
+4. Read [Known Limitations](KNOWN_LIMITATIONS.md) before interpreting any metric.
+5. Run the command in [Demo Scenarios](DEMO_SCENARIOS.md).
 
 ## Honest limitations
 

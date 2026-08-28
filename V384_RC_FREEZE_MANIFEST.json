@@ -1,0 +1,112 @@
+{
+  "manifest_version": "V384_RC_FREEZE_MANIFEST_V1",
+  "created_date": "2026-08-28",
+  "release_identifier": "industrial-knowledge-rag V3.84 local RC",
+  "status": "V3_84_RC_PROJECT_EVIDENCE_READY",
+  "source_branch": "main",
+  "validated_rc_source_head": "f981ac6a3c14077179277d0f5e67790598f1aa0f",
+  "packaging_parent_head": "5bdd173cfa62e23acaa8ddbfe5aa3b6169198b63",
+  "v383_rc_manifest": {
+    "path": "V383_RELEASE_CANDIDATE_MANIFEST.json",
+    "sha256": "058400ad23468cd86c18c21020c806e72113d0142fb07c6f559b9dad61ef196c",
+    "consistent": true
+  },
+  "deployment": {
+    "topology": "Docker Compose light-mode FastAPI backend with persistent named volumes and separately hosted frontend",
+    "formal_image_digest": "sha256:183cc4017252d50ecfdf49f946d7e52cff5d4047161b9ce3c11e38be741bcc99",
+    "formal_image_size_bytes": 162451362,
+    "Dockerfile_sha256": "c657304318a8d05b938d4e721ff0f702b540503f24f3a74131f0f12e275597d4",
+    "compose_yaml_sha256": "7f001f43edd7103343a13afb9ee20850967da57b2fbba6f7e29e86abee10cd5a",
+    "runtime_config_sha256": "c02727995d8b4e238913d6886f7cfb83a74770cbb6b3ad716500d13faa91b627"
+  },
+  "correctness": {
+    "authority": "CONTRACT_NATIVE_V367",
+    "benchmark_version": "V377_ALIGNED_BENCHMARK_V2",
+    "total": 69,
+    "correct": 54,
+    "false_answer": 9,
+    "false_refusal": 3,
+    "accuracy": 0.7826,
+    "answerable_recall": 0.7692,
+    "abstention_recall": 0.7907,
+    "hard_negative": "10/10",
+    "digest": "dcd548906ef2b1f233282283b8684f8c82066dc5eea9f0179ff45a4034a5aa1d",
+    "benchmark_hashes": {
+      "corpus": "1c4b2d78cfe5cde01d4cddc419a27f5a28a36a6287e0709c2a23c2283ebf2fe1",
+      "query_text": "a7de41a7db76f160d15b990bb4fba0f3fe772e9f4e7413202299b4f13872d145",
+      "expectation": "7734c28c7470bc94ffb286dfc8dad84cc5de1d4cf57c6c45eace44a8b898bf3a",
+      "runtime_config": "fbafd02823a0b7f5540c1581c1ccd6876bc2d5c0ea838f878c3bfcdd925b252a"
+    }
+  },
+  "evaluation": {
+    "evaluator_authority": "CONTRACT_NATIVE_V367",
+    "evaluator_sha256": "db838edf3f4bb7b56d7c1f2f48175de0492e55b7050644eb7c21ce71cb01b96d",
+    "score_lineage_version": "RETRIEVAL_SCORE_LINEAGE_FIDELITY_READY",
+    "score_lineage_sha256": "80a5e4d98b38d1dd274b3e76046332aef3255b011264c0e30c768174fa1c7ca1"
+  },
+  "protected_semantic_file_sha256": {
+    "backend/retrieval/evidence.py": "110785fe8d469d09e72aed80020f3d7a72f104be3717db235f274d2627ad3bbe",
+    "backend/retrieval/evidence_support.py": "c54057b2c6e4439872c8708be579ab20038d241b77ecd97adc89da370338e8e0",
+    "backend/retrieval/semantic_judge_localnli.py": "40fe371f594a8a9d63a35c8aa43745dd397def4167781927330a051f2fe4d02e",
+    "backend/retrieval/evidence_contract.py": "8819b595d57b415b687d860df837419abd356b9782b2f382c6a7123cdfeb858d",
+    "backend/retrieval/evidence_querytype.py": "cd2eaa6abc70139d50eb093a34daf32c9856725134073b8b5e453bae098ad4ec",
+    "rag_core.py": "302ea358e005bebb086c1684871218ab3c42da9c34889f8d00eae4c165b89cca",
+    "backend/rag_core.py": "6378c7e16c9519593d5c0ff5f7a18c12c6bf6bb9ac329a261c65c72c5a61fe12",
+    "backend/light_rag_core.py": "2f0804fc6507c0751e2e7acb640652b5c1fa702c4dac4372eb5b8fb6b016da61",
+    "backend/retrieval/candidates.py": "46db6d7c30ed334adee819c68e59ab5232b12405d2c6b0774db2fac37eadf584",
+    "backend/retrieval/fusion.py": "2924b0612f779ce820d318c9fe87a18610589e234afb369cdcf06dc0f2c31cbe",
+    "backend/evaluation/score_lineage.py": "80a5e4d98b38d1dd274b3e76046332aef3255b011264c0e30c768174fa1c7ca1",
+    "backend/retrieval/product_identity.py": "5b438c129310c1b7b4f5484a939db5b14c7d5561689819318e683d88e7458915",
+    "backend/retrieval/identity_reasoning.py": "b8defb4a2987b27eb22536538f49b52c5f77e50d24b788b55ed025b4d0f5a753",
+    "backend/retrieval/document_identity_v373.py": "941f8f9affe0d6497717a32e341182e718a32072a7f079a87bf3e6aa05aecc4d",
+    "backend/retrieval/technical.py": "5c8c22a6757e28ba0f41ca68f944c5f99638a1fd4ea97fe3478f2dedd585926a",
+    "backend/retrieval/filters.py": "ef8202a9ae2ac69a6726db516c9bb898a48c780fd667888817358a17ba2a0b13",
+    "backend/retrieval/scope.py": "07bf2ff8e3213ef2ca14797f9303c0fa6fd4f76e4e375a8d1df6130be732fd58",
+    "backend/retrieval/evidence_table_ownership.py": "32f274276bc1ddf10a0338d312254a85e377db8f03aa3f534c49c56a704c4484",
+    "backend/retrieval/table_context_v362.py": "8291e7fb53e1a6ff9ad73a8c0ab04426581f9888272ea625d73f98848291a2a6",
+    "backend/llm_client.py": "56ee07b0fcc96a22f7211e3e5d13f2ed94003adf8d282a7face1080a62c64900",
+    "backend/evaluation/contract_eval_v367.py": "db838edf3f4bb7b56d7c1f2f48175de0492e55b7050644eb7c21ce71cb01b96d",
+    "v369_real_baseline.py": "5a55eb787b9db5a5ddd214cd3b81e40f3fefa052353b867acafda07142c99491",
+    "backend/evaluation/benchmark_v2_schema.py": "4add838c11aeedef1e35931a5987e0713405c6ece533bd27a03890cc5edea868",
+    "v377_aligned_baseline.py": "6b094ef8532f12b84ee295055373d2b5bac5ed3488f9a1e81c5d757261281455",
+    "v377_build_aligned_benchmark.py": "403651de45460e13c7ff6b628a133b51fca5850e1b859e6e23f90993f520a2a3",
+    "v377_corpus_freeze.py": "59ea7ae1031f1c9075fd0c8450721dc6046cf865815da7753fc1900ad433e4ae",
+    "v377_support_context.py": "08d448e309465615b2953f9d8b17c7bff96c796832676b3d4d6c0439c742b7da",
+    "v377_support_probes.py": "e468bdc35e407b9ba09b74f2a8bb487a021b6088471b1a6d805954307e38b302"
+  },
+  "documentation_sha256": {
+    "README.md": "e9b40be0b059da921884cbb1c36bc778b318565cb39b2066be5b4be4b86e4432",
+    "ARCHITECTURE.md": "c90e4a81380cd7ccb286f9a0ed18786bf3341fb4f087f71cb5221e40a90a1302",
+    "EVALUATION.md": "0a35374777ea548cdfa46b8ccbbd2a407f99234e69883c45ae7099cdd00e5953",
+    "RESEARCH_DECISIONS.md": "71fa327ac72a3a4d7d3059d4749caddd12e2d2c6def8c2658b33c8dcaaf1ee17",
+    "FEATURE_STATUS.md": "d1a886947e26ff718b00fb21ff310466487b9d8e98c8cc31797029a7997acf39",
+    "KNOWN_LIMITATIONS.md": "8b3d22e5bfa57f3010ac854f0dc6a8269054672bddfa0c814bbd2e3c03fbda17",
+    "DEPLOYMENT.md": "18dcfcc1c60e83fe43cb9678f70903f9c2159a4ad8ccb17aec77972be8065be2",
+    "DEPLOYMENT_VALIDATION.md": "015ec6eb1347d0b2b848eae1ca7c51085a12c561f895c96a3020c69770f4277b",
+    "OPERATIONS_RUNBOOK.md": "2df13b93e1c4200004b305b18b890526120d48e7af20b41a43ff40cbe31dee77",
+    "DEMO_SCENARIOS.md": "cac3e8f8f07454c514c8cef4a2cbc913127a42e828469fce70d7c8f3d565848b",
+    "PROJECT_EVIDENCE.md": "258722eff75f13b533277826bdea8c5a9de862b643dab5430d6de9d6cd010c72",
+    "scripts/v384_public_demo.py": "9bd8c1e3a3894bda81d017d5b67e5569aafd67dc677886433d73469aca19fbfe"
+  },
+  "release_guards": {
+    "protected_hashes": "28/28 PASS",
+    "tracked_private_files": 0,
+    "rag_runtime_semantic_diff": "ZERO",
+    "public_demo_reproducible": true,
+    "documentation_links_valid": true,
+    "secret_and_absolute_path_scan": "PASS"
+  },
+  "external_pending_gates": [
+    "OPTIONAL_PROVIDER_CAPABILITY_NOT_VALIDATED",
+    "CI_EXTERNAL_EXECUTION_PENDING"
+  ],
+  "known_non_blocking_followups": [
+    "CONTAINER_PERFORMANCE_INVESTIGATION_REQUIRED"
+  ],
+  "git_actions": {
+    "push": false,
+    "tag": false,
+    "release": false
+  },
+  "next_phase": "OWNER DECISION"
+}
