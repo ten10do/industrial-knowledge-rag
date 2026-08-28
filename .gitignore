@@ -20,6 +20,16 @@ frontend/node_modules/
 frontend/dist/
 dist/
 *.pkl
+*.pdf
+*.safetensors
+*.onnx
+*.pt
+*.pth
+pytorch_model*.bin
+.cache/
+.huggingface/
+huggingface_cache/
+model_cache/
 .DS_Store
 .streamlit/
 .vscode/
