@@ -165,3 +165,9 @@ The container image excludes tests, offline evaluation assets, local results, PD
 - The validated topology is a single backend service with persistent volumes, not Kubernetes, high availability, or a multi-region production platform.
 
 The future independent research direction is layout-aware industrial document ingestion. It is explicitly outside the V3.84 release-candidate freeze.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
+
+Third-party dependencies and external data or model weights remain subject to their respective licenses.

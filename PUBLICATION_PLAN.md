@@ -2,9 +2,9 @@
 
 ## Current decision state
 
-**PRE-PUBLICATION AUDIT COMPLETE; EXTERNAL PUBLICATION BLOCKED BY OWNER LICENSE DECISION.**
+**PUBLIC_REPOSITORY_PRECHECK_READY; AWAITING OWNER EXTERNAL-WRITE AUTHORIZATION.**
 
-No GitHub repository, remote, push, tag or release has been created. The project root has no LICENSE file. The owner must choose the repository license before any public external write.
+The owner selected the MIT License. The root LICENSE file is present with Copyright (c) 2026 ten10do. No GitHub repository, remote, push, tag or release has been created.
 
 ## Proposed repository metadata
 
@@ -13,7 +13,7 @@ No GitHub repository, remote, push, tag or release has been created. The project
 | Repository name | industrial-knowledge-rag |
 | Description | Deployment-validated industrial knowledge RAG with hybrid retrieval, model-aware evidence checks, safe abstention, structured evaluation, and Docker/FastAPI operations. |
 | Default branch | main |
-| Visibility | Public only after the license decision and a repeated clean precheck; otherwise keep unpublished |
+| Visibility | Public after explicit external-write authorization and exact-SHA CI validation |
 | Frozen RC | V3.84 deployment-validated development RC |
 | Runtime/package source | b4b75a1086a05e887a8da39d757f2fb079010508 plus V3.85 publication-only documentation |
 
@@ -30,17 +30,16 @@ Suggested topics:
 - evaluation
 - safe-ai
 
-## Owner decisions required
+## Owner decisions required before external writes
 
-1. Choose and authorize a repository license. No license is selected by this plan.
+1. Authorize repository creation/remote setup/push in a later turn.
 2. Confirm the GitHub account or organization and public visibility.
-3. Choose the release identifier: rc-v3.84 or v0.1.0-rc1.
-4. Authorize repository creation/remote setup/push in a later turn.
-5. After exact-SHA CI passes, separately authorize any Git tag and GitHub Release.
+3. After exact-SHA CI passes, choose the release identifier: rc-v3.84 or v0.1.0-rc1.
+4. Separately authorize any Git tag and GitHub Release.
 
 ## License audit context
 
-Installed direct Python and frontend packages declare permissive MIT, BSD, Apache-2.0, ISC, 0BSD, Zlib or CC0-family metadata. This is an engineering inventory, not legal advice or a complete transitive-license opinion.
+The project is licensed under MIT. This covers repository code and documentation only to the extent held by the copyright owner. Installed direct Python and frontend packages declare permissive MIT, BSD, Apache-2.0, ISC, 0BSD, Zlib or CC0-family metadata. This is an engineering inventory, not legal advice or a complete transitive-license opinion.
 
 - pdfplumber 0.11.10 declares MIT and is research-only, not in the product requirements.
 - PyMuPDF 1.28.2 declares AGPL-3.0/commercial dual licensing. It is not declared in product requirements or included in the Docker image; one historical validation script can optionally import it.
@@ -62,14 +61,13 @@ Official GitHub actions currently use major-version refs: actions/checkout@v4, a
 
 ## Publication sequence after future authorization
 
-1. Add the owner-selected LICENSE and rerun current/history hygiene, links, demo, release guard and RC consistency checks.
-2. Create or confirm the GitHub repository.
-3. Add the authorized remote and push main only.
-4. Observe CI for the exact pushed SHA.
-5. Fix only publication/CI defects if necessary; do not reopen RAG research.
-6. Record exact-SHA CI evidence.
-7. Ask for separate tag/release authorization.
-8. If authorized, create the chosen tag and publish the prepared release notes.
+1. Create or confirm the GitHub repository.
+2. Add the authorized remote and push main only.
+3. Observe CI for the exact pushed SHA.
+4. Fix only publication/CI defects if necessary; do not reopen RAG research.
+5. Record exact-SHA CI evidence.
+6. Ask for separate tag/release authorization.
+7. If authorized, create the chosen tag and publish the prepared release notes.
 
 ## Release draft
 
