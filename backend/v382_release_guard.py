@@ -10,6 +10,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MANIFEST_PATH = REPO_ROOT / "V382_RESEARCH_FREEZE_MANIFEST.json"
+RESEARCH_FREEZE_COMMIT = "3d2a1a1f32554d88f5a3d7ee35b70be72eb761ec"
 
 PRIVATE_PATH_PARTS = (
     "backend/evaluation/benchmark_private/",
@@ -29,8 +30,21 @@ SECRET_PATTERNS = (
 )
 
 
-def sha256_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _matches_frozen_file(path: Path, relative: str, expected: str) -> bool:
+    current = path.read_bytes()
+    if hashlib.sha256(current).hexdigest() == expected:
+        return True
+    frozen = subprocess.run(
+        ["git", "show", f"{RESEARCH_FREEZE_COMMIT}:{relative}"],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+    )
+    if frozen.returncode != 0:
+        return False
+    return current.replace(b"\r\n", b"\n") == frozen.stdout.replace(
+        b"\r\n", b"\n"
+    )
 
 
 def load_manifest() -> dict:
@@ -45,7 +59,7 @@ def verify_research_freeze() -> dict:
         path = REPO_ROOT / relative
         if not path.is_file():
             missing.append(relative)
-        elif sha256_file(path) != expected:
+        elif not _matches_frozen_file(path, relative, expected):
             drift.append(relative)
     category_files = {
         relative

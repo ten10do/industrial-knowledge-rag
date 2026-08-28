@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -23,7 +24,11 @@ from backend.runtime_config import (
     RuntimeConfigurationError,
     validate_runtime_environment,
 )
-from backend.v382_release_guard import audit_tracked_private_files, verify_research_freeze
+from backend.v382_release_guard import (
+    _matches_frozen_file,
+    audit_tracked_private_files,
+    verify_research_freeze,
+)
 from backend.task_queue import MemoryTaskQueue
 
 
@@ -365,6 +370,18 @@ def test_research_freeze_and_private_artifact_guards_pass():
     assert freeze["status"] == "PASS"
     assert freeze["baseline"]["correct"] == 54
     assert private == {"status": "PASS", "tracked_private_files": 0, "paths": []}
+
+
+def test_research_freeze_accepts_only_line_ending_differences(tmp_path):
+    path = tmp_path / "frozen.py"
+    path.write_bytes(b"first\r\nsecond\r\n")
+    frozen = subprocess.CompletedProcess(args=[], returncode=0, stdout=b"first\nsecond\n")
+    with patch("backend.v382_release_guard.subprocess.run", return_value=frozen):
+        assert _matches_frozen_file(path, "frozen.py", "not-the-raw-hash")
+
+    frozen.stdout = b"first\nchanged\n"
+    with patch("backend.v382_release_guard.subprocess.run", return_value=frozen):
+        assert not _matches_frozen_file(path, "frozen.py", "not-the-raw-hash")
 
 
 def test_memory_worker_lifecycle_shuts_down_and_restarts_cleanly():
