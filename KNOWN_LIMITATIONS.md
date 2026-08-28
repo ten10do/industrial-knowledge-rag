@@ -26,7 +26,7 @@ A future phase requires layout-aware PDF parsing; explicit rows, columns, header
 
 ## Operational boundary
 
-- The native production-like lifecycle and 10-minute soak passed, but the formal Docker Compose release topology has not completed image-build or container-lifecycle validation because the local Docker daemon is unavailable.
+- The native production-like lifecycle and 10-minute soak passed. The formal Docker Compose topology also passed V3.83-C image and lifecycle validation. A repeated container concurrency-1 HTTP profile had p95 9.11 ms versus the V3.83 native 1.96 ms reference, so `CONTAINER_PERFORMANCE_INVESTIGATION_REQUIRED` remains a non-blocking operational follow-up; concurrency 4/8 stayed close to the native reference and all load requests succeeded.
 - CI workflow configuration is valid, but this repository has no configured Git remote and the V3.83 commits were not pushed; `CI_EXECUTED_PASS` is therefore not claimed.
 - No runtime-parseable Groq or DeepSeek key was available. Optional-provider degradation and safe failure passed, but a real successful generation and its `ANSWER` metric were not validated.
 - V3.83 is not a claim of Kubernetes or multi-region certification.

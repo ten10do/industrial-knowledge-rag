@@ -1,0 +1,174 @@
+{
+  "manifest_version": "V383_RELEASE_CANDIDATE_MANIFEST_V1",
+  "created_date": "2026-08-28",
+  "status": "DEPLOYMENT_FAILURE_MODE_VALIDATION_READY",
+  "source_branch": "main",
+  "recovery_head": "cce8e3432207e86d2de68977c0890a45160a5ae2",
+  "source_commit": "f0134f5dff396ecce50dc641ee821d5f0aed980f",
+  "deployment_topology": "Docker Compose light-mode FastAPI backend with persistent named volumes and separately hosted frontend",
+  "validation_input_manifest": "V383C_CONTAINER_VALIDATION_INPUT_MANIFEST.json",
+  "docker": {
+    "daemon_available": true,
+    "desktop_version": "4.85.0",
+    "client_version": "29.6.2",
+    "server_engine_version": "29.6.2",
+    "server_api_version": "1.55",
+    "server_os_arch": "linux/amd64",
+    "compose_version": "5.3.1"
+  },
+  "deployment_inputs": {
+    "Dockerfile_sha256": "c657304318a8d05b938d4e721ff0f702b540503f24f3a74131f0f12e275597d4",
+    "compose_yaml_sha256": "7f001f43edd7103343a13afb9ee20850967da57b2fbba6f7e29e86abee10cd5a",
+    "dockerignore_sha256": "a59b544430b90eb9e8a68c0bd58afc074926d32e7b04abb4d013a0ebdb7c3879",
+    "runtime_config_sha256": "c02727995d8b4e238913d6886f7cfb83a74770cbb6b3ad716500d13faa91b627",
+    "protected_manifest_sha256": "9ba84bc51bc270ef2d33fca225d8a1249951b0d179d1f34a6a00225f29469f8e"
+  },
+  "image": {
+    "tag": "industrial-knowledge-rag-api:latest",
+    "id": "sha256:183cc4017252d50ecfdf49f946d7e52cff5d4047161b9ce3c11e38be741bcc99",
+    "digest": "sha256:183cc4017252d50ecfdf49f946d7e52cff5d4047161b9ce3c11e38be741bcc99",
+    "size_bytes": 162451362,
+    "build_command": "docker compose build",
+    "cold_build_duration_seconds": 127.520,
+    "final_rebuild_duration_seconds": 5.446,
+    "build_valid": true,
+    "content_audit_valid": true,
+    "runtime_user": "uid=100(app) gid=101(app)",
+    "non_root": true,
+    "app_file_count": 77,
+    "app_bytes": 938878
+  },
+  "container": {
+    "runtime_valid": true,
+    "published_port": 8000,
+    "compose_up_duration_seconds": 1.981,
+    "liveness": {"http": 200, "status": "ok", "process_only_semantics": true},
+    "readiness": {
+      "http": 200,
+      "status": "degraded",
+      "ready": true,
+      "required_checks_pass": true,
+      "degraded_reason": "optional llm_provider no_provider_configured"
+    },
+    "health_valid": true,
+    "public_smoke_valid": true,
+    "request_id_valid": true,
+    "structured_logging_valid": true,
+    "privacy_sentinel_valid": true,
+    "metrics_smoke_valid": true
+  },
+  "restart": {
+    "valid": true,
+    "passed": 3,
+    "total": 3,
+    "cycles": [
+      {"cycle": 1, "to_live_ms": 1497.32, "to_ready_ms": 1501.93, "ready_status": "degraded"},
+      {"cycle": 2, "to_live_ms": 1425.72, "to_ready_ms": 1430.43, "ready_status": "degraded"},
+      {"cycle": 3, "to_live_ms": 1266.98, "to_ready_ms": 1270.39, "ready_status": "degraded"}
+    ]
+  },
+  "persistence": {
+    "valid": true,
+    "synthetic_index_sha256_before": "b83bb64ea9c8bb79a3f5060b0125d746a62c02ad0216c92177cff8dd60366b83",
+    "synthetic_index_sha256_after": "b83bb64ea9c8bb79a3f5060b0125d746a62c02ad0216c92177cff8dd60366b83",
+    "private_index_policy": "not baked; frozen 7333-chunk logical evidence reused read-only",
+    "private_logical_index_sha256": "644c9dc8f835a48cb2ea5399b8a17eb042d9dac4c71a6a55f3bf147d52d3700b"
+  },
+  "recreation": {
+    "valid": true,
+    "old_container_id": "fd937bdf229adb48c7a792ee3a8ffe998f2f76ef1af7518204ab8118f5496507",
+    "new_container_id": "460aa87e7cc636769e59e89f6320e1002aca681056704cd6f5852f813b667683",
+    "to_live_ms": 1725.13,
+    "to_ready_ms": 1729.72,
+    "volume_preserved": true
+  },
+  "shutdown": {
+    "valid": true,
+    "passed": 3,
+    "total": 3,
+    "latency_ms": [848.84, 774.36, 781.24],
+    "exit_codes": [0, 0, 0],
+    "graceful_logs": [true, true, true],
+    "oom_killed": [false, false, false]
+  },
+  "load_smoke": {
+    "valid": true,
+    "profiles": [
+      {"concurrency": 1, "requests": 24, "success": 24, "errors": 0, "median_ms": 1.91, "p95_ms": 17.25, "max_ms": 23.73},
+      {"concurrency": 4, "requests": 24, "success": 24, "errors": 0, "median_ms": 5.79, "p95_ms": 23.28, "max_ms": 23.30},
+      {"concurrency": 8, "requests": 24, "success": 24, "errors": 0, "median_ms": 6.79, "p95_ms": 23.22, "max_ms": 23.23}
+    ],
+    "c1_confirmation": {"requests": 24, "success": 24, "median_ms": 1.64, "p95_ms": 9.11, "max_ms": 14.02},
+    "performance_classification": "CONTAINER_PERFORMANCE_INVESTIGATION_REQUIRED",
+    "performance_followup_blocks_ready": false
+  },
+  "resource_observation": {
+    "cpu_percent": 0.11,
+    "memory_usage": "112MiB / 15.54GiB",
+    "memory_percent": 0.70,
+    "pids": 61,
+    "oom_killed": false
+  },
+  "compose_shutdown": {
+    "down_without_v": true,
+    "containers_removed": true,
+    "network_removed": true,
+    "named_volumes_retained": true
+  },
+  "provider": {
+    "requirement": "OPTIONAL",
+    "certified_container_environment": "KEYLESS",
+    "real_provider_available": false,
+    "classification": "OPTIONAL_PROVIDER_CAPABILITY_NOT_VALIDATED",
+    "blocks_internal_ready": false
+  },
+  "ci": {
+    "configured": true,
+    "executed": false,
+    "classification": "CI_EXTERNAL_EXECUTION_PENDING",
+    "blocks_internal_ready": false
+  },
+  "correctness": {
+    "benchmark_version": "V377_ALIGNED_BENCHMARK_V2",
+    "total": 69,
+    "correct": 54,
+    "false_answer": 9,
+    "false_refusal": 3,
+    "accuracy": 0.7826,
+    "answerable_recall": 0.7692,
+    "abstention_recall": 0.7907,
+    "hard_negative": "10/10",
+    "digest": "dcd548906ef2b1f233282283b8684f8c82066dc5eea9f0179ff45a4034a5aa1d",
+    "score_lineage_fidelity": "69/69",
+    "double_replay_match": true,
+    "summary_artifact_sha256": "7de42120391ee5445342d046a5d4c11fe9cfab9cd7bd2dcdad8e955a22f0a25b"
+  },
+  "release_guards": {
+    "protected_hashes": "28/28 PASS",
+    "tracked_private_files": 0,
+    "rag_semantic_diff": "ZERO"
+  },
+  "operational_fix": {
+    "commit": "f0134f5dff396ecce50dc641ee821d5f0aed980f",
+    "files": [".dockerignore"],
+    "root_cause": "production image included test and offline evaluation files, including a developer-specific absolute path",
+    "rag_semantics_changed": false
+  },
+  "evidence_versions": {
+    "deployment_docs_sha256": "18dcfcc1c60e83fe43cb9678f70903f9c2159a4ad8ccb17aec77972be8065be2",
+    "operations_runbook_sha256": "2df13b93e1c4200004b305b18b890526120d48e7af20b41a43ff40cbe31dee77",
+    "known_limitations_sha256": "cc3c3381d456bda838685832bea5ea153ffc4b0aa122ae9b81cd930cb25574b9",
+    "v383_native_report_sha256": "935ba5df57a899105313bcad7ab38b35c25951a58ac79361c2c0cd2dc482a2af",
+    "v383_native_soak": "600.12 seconds / 11678 requests / 0 errors",
+    "frontend": "REUSED_FROM_V383: 34/34 PASS; production build PASS; CORS PASS"
+  },
+  "external_pending_gates": [
+    "OPTIONAL_PROVIDER_CAPABILITY_NOT_VALIDATED",
+    "CI_EXTERNAL_EXECUTION_PENDING"
+  ],
+  "known_non_blocking_followups": [
+    "CONTAINER_PERFORMANCE_INVESTIGATION_REQUIRED"
+  ],
+  "remaining_internal_blockers": [],
+  "next_phase": "V3.84 Release Candidate Packaging & Project Evidence"
+}
