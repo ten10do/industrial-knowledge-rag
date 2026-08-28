@@ -1,0 +1,67 @@
+{
+  "manifest_version": "V383C_CONTAINER_VALIDATION_INPUT_MANIFEST_V1",
+  "created_date": "2026-08-28",
+  "status": "DEPLOYMENT_FAILURE_MODE_VALIDATION_PARTIAL",
+  "source_branch": "main",
+  "source_head": "35a707610b0d7933ace920b46284d33f458d9530",
+  "source_tree_state": "CLEAN",
+  "deployment_topology": "docker_compose_light_backend_with_separately_hosted_frontend",
+  "docker_probe": {
+    "classification": "DOCKER_CLI_ONLY",
+    "client_version": "29.6.2",
+    "server_version": null,
+    "compose_version": "5.3.1",
+    "context": "desktop-linux",
+    "engine_pipe_present": false,
+    "docker_version_exit_code": 1,
+    "docker_info_exit_code": 1,
+    "reason": "dockerDesktopLinuxEngine pipe is absent; no Docker Server information is available"
+  },
+  "frozen_inputs": {
+    "Dockerfile_sha256": "c657304318a8d05b938d4e721ff0f702b540503f24f3a74131f0f12e275597d4",
+    "compose_yaml_sha256": "7f001f43edd7103343a13afb9ee20850967da57b2fbba6f7e29e86abee10cd5a",
+    "dockerignore_sha256": "453b174123b00dd97a709999a4771b2eab54a7625c473715dc0cd38c7d0fd6a7",
+    "runtime_config_sha256_from_v383_manifest": "c02727995d8b4e238913d6886f7cfb83a74770cbb6b3ad716500d13faa91b627",
+    "v383_deployment_validation_manifest_sha256": "90250e9649807ab3be6e4a12dc459b7d54e27c4adec04c78c2519f1120d34afe",
+    "v382_research_freeze_manifest_sha256": "9ba84bc51bc270ef2d33fca225d8a1249951b0d179d1f34a6a00225f29469f8e",
+    "synthetic_light_index_sha256_from_v383": "b83bb64ea9c8bb79a3f5060b0125d746a62c02ad0216c92177cff8dd60366b83",
+    "private_logical_index_sha256_read_only": "644c9dc8f835a48cb2ea5399b8a17eb042d9dac4c71a6a55f3bf147d52d3700b",
+    "private_logical_chunk_count": 7333
+  },
+  "correctness_evidence": {
+    "policy": "REUSED_V383_FINAL_REPLAY_ARTIFACT",
+    "artifact": "results/v377_aligned_baseline/aligned_baseline_summary.json",
+    "artifact_sha256": "48db122ce9cee34fbdb9883bdd0ad2582c2c26a944fd03610bdc3b8c9b577e07",
+    "correct": 54,
+    "false_answer": 9,
+    "false_refusal": 3,
+    "hard_negative": "10/10",
+    "replay_digest": "dcd548906ef2b1f233282283b8684f8c82066dc5eea9f0179ff45a4034a5aa1d"
+  },
+  "gate_results": {
+    "compose_config_valid": true,
+    "compose_config_evidence": "REUSED_FROM_V383B",
+    "image_build_valid": false,
+    "image_content_audit_valid": false,
+    "container_runtime_valid": false,
+    "container_health_valid": false,
+    "container_restart_valid": false,
+    "container_persistence_valid": false,
+    "container_shutdown_valid": false,
+    "container_load_smoke_valid": false,
+    "blocked_reason": "CONTAINER_RUNTIME_VALIDATION_BLOCKED"
+  },
+  "execution_policy": {
+    "container_validation_started": false,
+    "code_or_config_changed": false,
+    "tests_rerun": false,
+    "benchmark_rerun": false,
+    "soak_rerun": false,
+    "release_candidate_manifest_generated": false
+  },
+  "external_state": {
+    "provider": "OPTIONAL_PROVIDER_CAPABILITY_NOT_VALIDATED",
+    "ci": "CI_EXTERNAL_EXECUTION_PENDING",
+    "autocourse_rag_head_read_only": "a430235d28de0fe79c0790acc2c99220fc239d1b"
+  }
+}
