@@ -1,6 +1,6 @@
 # Project Evidence
 
-## Portfolio summary
+## Project summary
 
 Industrial Knowledge RAG is a complete engineering case study in building a safety-oriented RAG system under evidence constraints. Its strongest evidence is not a single accuracy number; it is the chain from data boundary, structured evaluation and failure attribution to reproducible deployment gates and honest stop decisions.
 
@@ -17,6 +17,7 @@ Industrial Knowledge RAG is a complete engineering case study in building a safe
 | Runtime is regression protected | V3.83 report | 948 passed, 2 skipped; frontend 34/34 and build |
 | Release topology was actually executed | DEPLOYMENT_VALIDATION.md | image, non-root, lifecycle, persistence, load and privacy gates |
 | Public behavior is reproducible | scripts/v384_public_demo.py | keyless supported decision, wrong-model and unknown-fault refusal |
+| Public CI is executed | GitHub Actions run 33156355678 | exact SHA 5df4ef42efc0d9e9922087a763aa65ba92dd8c4a; four required jobs passed |
 | Private assets remain private | .gitignore, .dockerignore, release guard | tracked private files 0; image content audit passed |
 
 ## Engineering decisions with demonstrated value
@@ -82,7 +83,6 @@ Result: all internal container gates passed; the image identity and evidence are
 - certified safety or domain-wide production accuracy;
 - correct cell-level ownership for industrial tables;
 - validated real-provider answer generation in the certified container;
-- remote CI success;
 - HA, Kubernetes or multi-region readiness;
 - permission to publish private manuals or annotations.
 
@@ -94,7 +94,7 @@ For a research review: RESEARCH_DECISIONS -> docs/research/README.md -> V3.65, V
 
 For an operational review: DEPLOYMENT -> OPERATIONS_RUNBOOK -> CONFIGURATION_MATRIX -> V383_RELEASE_CANDIDATE_MANIFEST.json.
 
-## Resume bullet candidates
+## Validation highlights
 
 - Built a safety-oriented industrial RAG platform that separates hybrid retrieval from a deterministic ANSWER/ABSTAIN Evidence contract, with model/identifier scoping, versioned knowledge bases and optional cited generation.
 - Rebuilt evaluation around a contract-native 151-case authority suite with 0% evaluator false accepts, then repaired benchmark/corpus alignment while preserving all 69 query texts and freezing reproducibility hashes.

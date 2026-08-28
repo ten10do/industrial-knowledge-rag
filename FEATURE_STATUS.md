@@ -37,7 +37,7 @@ Status meanings:
 | Cell-level table ownership | UNSUPPORTED | Authority NONE; flat-text inference forbidden |
 | OCR and layout-aware ingestion | UNSUPPORTED | Candidate future independent phase |
 | Provider-backed successful answer validation | EXTERNAL PENDING | Requires authorized credential/network/model |
-| Remote CI execution | EXTERNAL PENDING | Workflow configured; no remote/push action in V3.84 |
+| Remote CI execution | READY | `REMOTE_CI_EXECUTED_PASS` for exact SHA `5df4ef42efc0d9e9922087a763aa65ba92dd8c4a`; later HEADs require their own run |
 | Kubernetes/HA/multi-region operations | UNSUPPORTED | Not part of the validated topology |
 
 For quantified limits see [Known Limitations](KNOWN_LIMITATIONS.md). For experiment rationale see [Research Decisions](RESEARCH_DECISIONS.md).

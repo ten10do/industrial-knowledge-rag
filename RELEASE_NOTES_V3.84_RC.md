@@ -1,6 +1,6 @@
 # V3.84 RC — Deployment-Validated Industrial Knowledge RAG
 
-> Draft only. The repository is MIT licensed. Do not publish until the owner authorizes external writes and the exact pushed SHA passes real CI.
+> Draft release notes. The MIT-licensed repository is public and exact-SHA CI has passed. Do not create a tag or GitHub Release without separate owner authorization.
 
 ## Overview
 
@@ -70,10 +70,10 @@ The demo creates and removes a synthetic local index. It requires no private PDF
 
 Provider state: OPTIONAL_PROVIDER_CAPABILITY_NOT_VALIDATED.
 
-CI state in this draft: CI_CONFIGURED / CI_EXTERNAL_EXECUTION_PENDING. CI PASS must not be claimed until the exact public SHA completes the remote workflow.
+CI state: `REMOTE_CI_EXECUTED_PASS` for exact SHA `5df4ef42efc0d9e9922087a763aa65ba92dd8c4a` in GitHub Actions run `33156355678`. Every later public HEAD requires its own completed successful run.
 
 ## Publication prerequisite
 
 The project LICENSE is MIT, Copyright (c) 2026 ten10do. Third-party dependencies and external data/model weights retain their own licenses.
 
-The internal public-repository precheck is ready. Repository creation, remote setup, push, tag and release still require explicit owner authorization; CI PASS requires a real run on the exact pushed SHA.
+The public repository, `origin/main`, MIT license and real CI evidence are present. Tag creation and GitHub Release publication remain separate owner decisions.

@@ -75,18 +75,17 @@
     "v377_support_probes.py": "e468bdc35e407b9ba09b74f2a8bb487a021b6088471b1a6d805954307e38b302"
   },
   "documentation_sha256": {
-    "README.md": "e9b40be0b059da921884cbb1c36bc778b318565cb39b2066be5b4be4b86e4432",
+    "README.md": "5c15ce6036ae0e2accbbb1b03d057db4a683355eab76a4619c9b01faa39aee5a",
     "ARCHITECTURE.md": "c90e4a81380cd7ccb286f9a0ed18786bf3341fb4f087f71cb5221e40a90a1302",
     "EVALUATION.md": "0a35374777ea548cdfa46b8ccbbd2a407f99234e69883c45ae7099cdd00e5953",
     "RESEARCH_DECISIONS.md": "71fa327ac72a3a4d7d3059d4749caddd12e2d2c6def8c2658b33c8dcaaf1ee17",
-    "FEATURE_STATUS.md": "d1a886947e26ff718b00fb21ff310466487b9d8e98c8cc31797029a7997acf39",
-    "KNOWN_LIMITATIONS.md": "8b3d22e5bfa57f3010ac854f0dc6a8269054672bddfa0c814bbd2e3c03fbda17",
+    "FEATURE_STATUS.md": "3e33cea9d141c57b306fdef1b311eb730067c8107f08098d9ba7a6815d4f5dea",
+    "KNOWN_LIMITATIONS.md": "0ec3c038a33616a68c6bdda12cfdd1aba6c213214ab13f0d6d8817580336d915",
     "DEPLOYMENT.md": "18dcfcc1c60e83fe43cb9678f70903f9c2159a4ad8ccb17aec77972be8065be2",
-    "DEPLOYMENT_VALIDATION.md": "015ec6eb1347d0b2b848eae1ca7c51085a12c561f895c96a3020c69770f4277b",
+    "DEPLOYMENT_VALIDATION.md": "9f42fa162c058fc1261f0ff5e7ca20e43e9af65ebe21a7ae4ebd2ee66872b9a8",
     "OPERATIONS_RUNBOOK.md": "2df13b93e1c4200004b305b18b890526120d48e7af20b41a43ff40cbe31dee77",
     "DEMO_SCENARIOS.md": "cac3e8f8f07454c514c8cef4a2cbc913127a42e828469fce70d7c8f3d565848b",
-    "PROJECT_EVIDENCE.md": "258722eff75f13b533277826bdea8c5a9de862b643dab5430d6de9d6cd010c72",
-    "INTERVIEW_STORIES.md": "d5eae42836c560fbd028f92befcd7e3a5f2c8a561b7405e16d4e4c022b0737b3",
+    "PROJECT_EVIDENCE.md": "7fa90357f09651009cff89442230d2a9a8f2118e873dc7eba3bedf0b02870f62",
     "scripts/v384_public_demo.py": "9bd8c1e3a3894bda81d017d5b67e5569aafd67dc677886433d73469aca19fbfe"
   },
   "release_guards": {
@@ -97,17 +96,22 @@
     "documentation_links_valid": true,
     "secret_and_absolute_path_scan": "PASS"
   },
+  "public_repository_validation": {
+    "status": "REMOTE_CI_EXECUTED_PASS",
+    "exact_sha": "5df4ef42efc0d9e9922087a763aa65ba92dd8c4a",
+    "workflow_run_id": 33156355678,
+    "required_jobs": "4/4 PASS"
+  },
   "external_pending_gates": [
-    "OPTIONAL_PROVIDER_CAPABILITY_NOT_VALIDATED",
-    "CI_EXTERNAL_EXECUTION_PENDING"
+    "OPTIONAL_PROVIDER_CAPABILITY_NOT_VALIDATED"
   ],
   "known_non_blocking_followups": [
     "CONTAINER_PERFORMANCE_INVESTIGATION_REQUIRED"
   ],
   "git_actions": {
-    "push": false,
+    "push": true,
     "tag": false,
     "release": false
   },
-  "next_phase": "OWNER DECISION"
+  "next_phase": "MAINTENANCE_OR_RELEASE_OWNER_DECISION"
 }

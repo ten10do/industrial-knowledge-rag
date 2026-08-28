@@ -27,7 +27,7 @@ A future phase requires layout-aware PDF parsing; explicit rows, columns, header
 ## Operational boundary
 
 - The native production-like lifecycle and 10-minute soak passed. The formal Docker Compose topology also passed V3.83-C image and lifecycle validation. A repeated container concurrency-1 HTTP profile had p95 9.11 ms versus the V3.83 native 1.96 ms reference, so `CONTAINER_PERFORMANCE_INVESTIGATION_REQUIRED` remains a non-blocking operational follow-up; concurrency 4/8 stayed close to the native reference and all load requests succeeded.
-- CI workflow configuration is valid, but this local RC phase does not configure a remote or push commits; `CI_EXTERNAL_EXECUTION_PENDING` is therefore not claimed as PASS.
+- Remote GitHub Actions completed successfully for exact public SHA `5df4ef42efc0d9e9922087a763aa65ba92dd8c4a` in run `33156355678`. Every later public HEAD still requires its own exact-SHA CI result.
 - No runtime-parseable Groq or DeepSeek key was available. Optional-provider degradation and safe failure passed, but a real successful generation and its `ANSWER` metric were not validated.
 - V3.83 is not a claim of Kubernetes or multi-region certification.
 - In-process metrics reset on process restart. External scraping/persistence is an operator responsibility.
