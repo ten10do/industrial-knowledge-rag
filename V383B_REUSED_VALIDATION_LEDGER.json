@@ -1,0 +1,72 @@
+{
+  "ledger_version": "V383B_REUSED_VALIDATION_LEDGER_V1",
+  "created_date": "2026-08-28",
+  "source_head": "316fbd1caf84b160896262a858d81f679e048607",
+  "reused_from_v383": {
+    "source_report": "V3.83_DEPLOYMENT_AND_FAILURE_MODE_VALIDATION_REPORT.md",
+    "source_report_sha256": "935ba5df57a899105313bcad7ab38b35c25951a58ac79361c2c0cd2dc482a2af",
+    "restart": "3/3 PASS",
+    "index_persistence": "PASS",
+    "required_dependency_failure": "PASS",
+    "optional_dependency_degradation": "PASS",
+    "dependency_recovery": "PASS",
+    "request_id_e2e": "PASS",
+    "concurrent_trace_isolation": "PASS",
+    "logging_privacy": "PASS",
+    "error_contract": "PASS",
+    "graceful_shutdown": "PASS",
+    "load_1_2_4_8": "PASS",
+    "soak": {
+      "duration_seconds": 600.12,
+      "requests": 11678,
+      "errors": 0,
+      "success_rate": 1.0,
+      "rss_start_mb": 145.89,
+      "rss_end_mb": 150.58,
+      "rss_peak_mb": 156.21
+    },
+    "runbook": "PASS",
+    "deployment_docs": "PASS",
+    "backend_full_suite": "948 passed, 2 skipped, 0 failed, 5 subtests passed",
+    "frontend": "34/34 PASS; production build PASS; CORS connectivity PASS"
+  },
+  "revalidated_now": {
+    "git_recovery": "main / clean / expected HEAD",
+    "compose_config": "PASS",
+    "focused_production_readiness_tests": "30 passed",
+    "research_freeze": "28/28 PASS",
+    "tracked_private_files": 0,
+    "saved_final_replay_artifact": {
+      "path": "results/v377_aligned_baseline/aligned_baseline_summary.json",
+      "sha256": "48db122ce9cee34fbdb9883bdd0ad2582c2c26a944fd03610bdc3b8c9b577e07",
+      "run1": "54/9/3",
+      "run2": "54/9/3",
+      "digest": "dcd548906ef2b1f233282283b8684f8c82066dc5eea9f0179ff45a4034a5aa1d",
+      "replay_match": true
+    }
+  },
+  "newly_validated": {
+    "docker_state": "DOCKER_CLI_ONLY",
+    "docker_client": "29.6.2",
+    "docker_compose": "5.3.1",
+    "provider_requirement": "OPTIONAL",
+    "provider_parseable_environment": "ABSENT",
+    "answer_metric_branch": "OPTIONAL_PROVIDER_CAPABILITY_NOT_VALIDATED",
+    "git_remote": "NONE",
+    "github_cli_auth": "PRESENT",
+    "ci_execution": "CI_EXTERNAL_EXECUTION_PENDING"
+  },
+  "still_blocked": {
+    "container_runtime_validation": true,
+    "image_build_valid": false,
+    "image_content_audit_valid": false,
+    "container_runtime_valid": false,
+    "container_health_valid": false,
+    "container_restart_valid": false,
+    "container_persistence_valid": false,
+    "container_shutdown_valid": false,
+    "container_privacy_valid": false,
+    "container_load_smoke_valid": false,
+    "reason": "Docker desktop-linux daemon pipe is unavailable."
+  }
+}

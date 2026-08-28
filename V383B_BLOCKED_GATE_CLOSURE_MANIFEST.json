@@ -1,0 +1,78 @@
+{
+  "manifest_version": "V383B_BLOCKED_GATE_CLOSURE_MANIFEST_V1",
+  "created_date": "2026-08-28",
+  "status": "DEPLOYMENT_FAILURE_MODE_VALIDATION_PARTIAL",
+  "source_head": "316fbd1caf84b160896262a858d81f679e048607",
+  "source_manifest": {
+    "path": "V383_DEPLOYMENT_VALIDATION_MANIFEST.json",
+    "sha256": "90250e9649807ab3be6e4a12dc459b7d54e27c4adec04c78c2519f1120d34afe"
+  },
+  "reuse_ledger": "V383B_REUSED_VALIDATION_LEDGER.json",
+  "deployment_topology": "Docker Compose light-mode FastAPI backend with persistent volumes and separately hosted frontend",
+  "docker": {
+    "daemon_state": "DOCKER_CLI_ONLY",
+    "client_version": "29.6.2",
+    "compose_version": "5.3.1",
+    "compose_config_valid": true,
+    "image_build_valid": false,
+    "image_content_audit_valid": false,
+    "container_runtime_valid": false,
+    "container_health_valid": false,
+    "container_restart_valid": false,
+    "container_persistence_valid": false,
+    "container_shutdown_valid": false,
+    "container_privacy_valid": false,
+    "container_load_smoke_valid": false,
+    "blocking_reason": "dockerDesktopLinuxEngine pipe absent; no build or runtime result claimed"
+  },
+  "provider": {
+    "requirement_contract": "OPTIONAL",
+    "process_environment": "ABSENT",
+    "dotenv_parseable_environment": "ABSENT",
+    "local_provider_endpoint": "NOT_SUPPORTED",
+    "real_provider_available": false,
+    "core_operational_metrics_valid": true,
+    "optional_answer_metric_branch_validated": false,
+    "classification": "OPTIONAL_PROVIDER_CAPABILITY_NOT_VALIDATED"
+  },
+  "ci": {
+    "workflow_config_valid": true,
+    "remote_state": "NO_REMOTE",
+    "github_cli_authenticated": true,
+    "executed": false,
+    "reason": "NO_REMOTE / NO_PUSH",
+    "hard_blocker_for_internal_deployment_ready": false,
+    "classification": "RELEASE_EXTERNAL_GATE_PENDING"
+  },
+  "correctness": {
+    "evidence_source": "REUSED_V383_FINAL_REPLAY_ARTIFACT",
+    "artifact_sha256": "48db122ce9cee34fbdb9883bdd0ad2582c2c26a944fd03610bdc3b8c9b577e07",
+    "correct": 54,
+    "false_answer": 9,
+    "false_refusal": 3,
+    "accuracy": 0.7826,
+    "answerable_recall": 0.7692,
+    "abstention_recall": 0.7907,
+    "hard_negative": "10/10",
+    "digest": "dcd548906ef2b1f233282283b8684f8c82066dc5eea9f0179ff45a4034a5aa1d",
+    "rag_semantic_diff": "ZERO"
+  },
+  "safety": {
+    "protected_hashes": "28/28 PASS",
+    "tracked_private_files": 0
+  },
+  "blocker_classification": {
+    "internal_engineering_blockers": [],
+    "external_environment_blockers": [
+      "CONTAINER_RUNTIME_VALIDATION_BLOCKED"
+    ],
+    "optional_capability_unvalidated": [
+      "OPTIONAL_PROVIDER_ANSWER_METRIC_BRANCH"
+    ],
+    "release_external_gates": [
+      "CI_EXTERNAL_EXECUTION_PENDING"
+    ]
+  },
+  "release_candidate_manifest_generated": false,
+  "next_phase": "Start an available Docker daemon, then rerun only the V3.83-B Docker gates."
+}
