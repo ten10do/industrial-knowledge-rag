@@ -1,6 +1,6 @@
 # V3.84 RC — Deployment-Validated Industrial Knowledge RAG
 
-> Draft only. Do not publish until the owner selects a repository license, authorizes external writes, and the exact pushed SHA passes real CI.
+> Draft only. The repository is MIT licensed. Do not publish until the owner authorizes external writes and the exact pushed SHA passes real CI.
 
 ## Overview
 
@@ -74,4 +74,6 @@ CI state in this draft: CI_CONFIGURED / CI_EXTERNAL_EXECUTION_PENDING. CI PASS m
 
 ## Publication prerequisite
 
-The repository currently has no project LICENSE. External publication remains blocked pending OWNER LICENSE DECISION.
+The project LICENSE is MIT, Copyright (c) 2026 ten10do. Third-party dependencies and external data/model weights retain their own licenses.
+
+The internal public-repository precheck is ready. Repository creation, remote setup, push, tag and release still require explicit owner authorization; CI PASS requires a real run on the exact pushed SHA.
