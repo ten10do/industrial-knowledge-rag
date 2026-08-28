@@ -17,6 +17,8 @@ backend/vector_db
 backend/light_indexes
 backend/public_versions
 backend/runtime_state
+backend/test*.py
+backend/evaluation
 backend/evaluation/benchmark_private
 frontend/node_modules
 frontend/dist
