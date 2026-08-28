@@ -31,7 +31,7 @@ This checklist packages the deployment-validated development RC. It is not a Git
 | Known limitations current | PASS | KNOWN_LIMITATIONS.md |
 | Deployment/runbook docs current | PASS | DEPLOYMENT.md, DEPLOYMENT_VALIDATION.md, OPERATIONS_RUNBOOK.md |
 | Optional provider capability | OPTIONAL_NOT_VALIDATED | authorized real provider unavailable in formal certified container |
-| Remote CI execution | PENDING_EXTERNAL | workflow configured; no remote/push in V3.84 |
+| Remote CI execution | PASS | run `33156355678`, exact SHA `5df4ef42efc0d9e9922087a763aa65ba92dd8c4a`, all four jobs successful |
 | Container P95 follow-up | NON_BLOCKING_KNOWN_LIMITATION | CONTAINER_PERFORMANCE_INVESTIGATION_REQUIRED |
 | Git tag / remote release | NOT_PERFORMED | owner authorization required |
 

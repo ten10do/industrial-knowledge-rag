@@ -111,7 +111,7 @@ It demonstrates liveness/readiness/metrics, a supported answerability decision, 
     npm run test
     npm run build
 
-The public CI workflow runs backend tests, the public operational smoke, offline public evaluation, a full-dependency import smoke, frontend tests/build, Compose validation, and an image build. Remote CI has not been executed in this local-only release-candidate phase and is not claimed as passed.
+The public CI workflow runs backend tests, the public operational smoke, offline public evaluation, a full-dependency import smoke, frontend tests/build, Compose validation, and an image build. GitHub Actions completed successfully for exact SHA `5df4ef42efc0d9e9922087a763aa65ba92dd8c4a` in [run 33156355678](https://github.com/ten10do/industrial-knowledge-rag/actions/runs/33156355678); every new public HEAD requires its own exact-SHA result.
 
 ## Evaluation boundary
 
@@ -160,7 +160,7 @@ The container image excludes tests, offline evaluation assets, local results, PD
 - The frozen private benchmark still has 9 false answers and 3 false refusals.
 - Cell-level table ownership is unsupported. Flat text cannot safely recover merged-cell and column semantics from many industrial manuals.
 - Claim-support validation, requirement-extraction upgrades, local NLI gating, reranking, and table-context logic are not production-ready and remain OFF by default.
-- A real optional provider answer path and remote CI execution are external-pending, not silently treated as passed.
+- A real optional provider answer path remains unvalidated; successful keyless CI does not establish provider capability.
 - The validated topology is a single backend service with persistent volumes, not Kubernetes, high availability, or a multi-region production platform.
 
 The future independent research direction is layout-aware industrial document ingestion. It is explicitly outside the V3.84 release-candidate freeze.

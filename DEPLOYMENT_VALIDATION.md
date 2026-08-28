@@ -71,10 +71,10 @@ Validated in the production-like native process and/or the real Compose containe
 - restart, stop, recreation, port release and index persistence;
 - request-ID isolation, bounded metrics labels and privacy-safe structured logs.
 
-## Explicitly pending
+## External boundaries
 
 - OPTIONAL_PROVIDER_CAPABILITY_NOT_VALIDATED: no authorized provider credential was used in the certified keyless container.
-- CI_EXTERNAL_EXECUTION_PENDING: the workflow is configured, but V3.84 performs no remote, push or release action.
+- REMOTE_CI_EXECUTED_PASS: GitHub Actions run `33156355678` passed for exact public SHA `5df4ef42efc0d9e9922087a763aa65ba92dd8c4a`.
 - Kubernetes, HA, multi-region, external metrics retention and production SLO certification are outside this topology.
 
 For commands and incident handling see [Deployment](DEPLOYMENT.md) and [Operations Runbook](OPERATIONS_RUNBOOK.md). The immutable machine-readable source is [V383 Release Candidate Manifest](V383_RELEASE_CANDIDATE_MANIFEST.json).
