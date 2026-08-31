@@ -59,6 +59,53 @@ def test_runtime_configuration_rejects_invalid_values(monkeypatch, name, value):
         validate_runtime_environment(load_environment=False)
 
 
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        # positive floats: NaN, +Infinity, -Infinity (all three spellings)
+        ("LIGHT_MAX_RELEVANT_DISTANCE", "NaN"),
+        ("LIGHT_MAX_RELEVANT_DISTANCE", "Infinity"),
+        ("LIGHT_MAX_RELEVANT_DISTANCE", "-Infinity"),
+        ("LIGHT_MAX_RELEVANT_DISTANCE", "nan"),
+        ("LIGHT_MAX_RELEVANT_DISTANCE", "inf"),
+        ("LIGHT_MAX_RELEVANT_DISTANCE", "-inf"),
+        ("FULL_MAX_RELEVANT_DISTANCE", "NaN"),
+        ("EVIDENCE_MAX_VECTOR_DISTANCE", "Infinity"),
+        ("MODEL_REQUEST_TIMEOUT_SECONDS", "-Infinity"),
+        # contract-branch ratio is optional but must be finite when set
+        ("EVIDENCE_CONTRACT_MAX_DISTANCE_RATIO", "NaN"),
+        ("EVIDENCE_CONTRACT_MAX_DISTANCE_RATIO", "Infinity"),
+        ("EVIDENCE_CONTRACT_MAX_DISTANCE_RATIO", "-Infinity"),
+        # non-negative floats
+        ("EVIDENCE_MIN_VECTOR_MARGIN", "NaN"),
+        ("EVIDENCE_MIN_VECTOR_MARGIN", "Infinity"),
+        ("EVIDENCE_MIN_VECTOR_MARGIN", "-Infinity"),
+    ],
+)
+def test_runtime_configuration_rejects_non_finite_floats(monkeypatch, name, value):
+    """NaN / +/-Infinity must never reach retrieval or evidence thresholds."""
+    monkeypatch.setenv(name, value)
+    with pytest.raises(RuntimeConfigurationError, match="finite"):
+        validate_runtime_environment(load_environment=False)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("LIGHT_MAX_RELEVANT_DISTANCE", "0.5"),
+        ("LIGHT_MAX_RELEVANT_DISTANCE", "1.2"),
+        ("EVIDENCE_MIN_VECTOR_MARGIN", "0"),
+        ("MODEL_REQUEST_TIMEOUT_SECONDS", "30.0"),
+        ("EVIDENCE_CONTRACT_MAX_DISTANCE_RATIO", "1.20"),
+        ("EVIDENCE_CONTRACT_MAX_DISTANCE_RATIO", ""),
+    ],
+)
+def test_runtime_configuration_accepts_finite_floats(monkeypatch, name, value):
+    """Finite values keep the existing behavior; empty optional stays valid."""
+    monkeypatch.setenv(name, value)
+    validate_runtime_environment(load_environment=False)
+
+
 def test_runtime_configuration_rejects_missing_redis_url(monkeypatch):
     monkeypatch.setenv("TASK_QUEUE_BACKEND", "redis")
     monkeypatch.delenv("REDIS_URL", raising=False)
