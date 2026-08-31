@@ -6,7 +6,7 @@ Supported baseline: Python 3.11+, Node.js 20+, or Docker Compose.
 
 ```powershell
 Copy-Item .env.example .env
-.\venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+.\venv\Scripts\python.exe -m pip install -r backend\requirements-windows.txt
 .\venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --no-access-log
 ```
 

@@ -1,15 +1,13 @@
 aiohappyeyeballs==2.7.1
     # via aiohttp
 aiohttp==3.14.3
-    # via
-    #   kubernetes
-    #   langchain-community
+    # via kubernetes
 aiosignal==1.4.0
     # via aiohttp
-altair==6.2.2
-    # via streamlit
 annotated-doc==0.0.5
-    # via typer
+    # via
+    #   fastapi
+    #   typer
 annotated-types==0.8.0
     # via pydantic
 anyio==4.14.2
@@ -19,7 +17,6 @@ anyio==4.14.2
     #   langsmith
     #   openai
     #   starlette
-    #   streamlit
     #   watchfiles
 attrs==26.1.0
     # via
@@ -28,8 +25,12 @@ attrs==26.1.0
     #   referencing
 bcrypt==5.0.0
     # via chromadb
-blinker==1.9.0
-    # via streamlit
+boto3==1.43.67
+    # via -r backend/requirements.in
+botocore==1.43.83
+    # via
+    #   boto3
+    #   s3transfer
 build==1.6.0
     # via chromadb
 certifi==2026.7.22
@@ -38,29 +39,24 @@ certifi==2026.7.22
     #   httpx
     #   kubernetes
     #   requests
-cffi==2.1.1
-    # via cryptography
 charset-normalizer==3.5.1
     # via requests
 chromadb==1.5.9
     # via
-    #   -r legacy_streamlit/requirements.in
+    #   -r backend/requirements-full.in
     #   langchain-chroma
 click==8.5.0
     # via
     #   huggingface-hub
-    #   streamlit
+    #   rq
     #   uvicorn
-cloudpickle==3.1.2
-    # via joblib
-cryptography==50.0.1
-    # via pypdf
-cuda-bindings==13.3.1
-    # via torch
-cuda-pathfinder==1.8.0
-    # via cuda-bindings
-cuda-toolkit==13.0.3.0
-    # via torch
+colorama==0.4.6
+    # via
+    #   build
+    #   tqdm
+    #   typer
+croniter==6.2.4
+    # via rq
 distro==1.9.0
     # via
     #   groq
@@ -68,6 +64,8 @@ distro==1.9.0
     #   openai
 durationpy==0.11
     # via kubernetes
+fastapi==0.139.2
+    # via -r backend/requirements.in
 filelock==3.32.4
     # via
     #   huggingface-hub
@@ -84,10 +82,8 @@ fsspec==2026.7.0
     #   torch
 googleapis-common-protos==1.75.2
     # via opentelemetry-exporter-otlp-proto-grpc
-greenlet==3.5.5
-    # via sqlalchemy
 groq==1.5.0
-    # via -r legacy_streamlit/requirements.in
+    # via -r backend/requirements.in
 grpcio==1.83.1
     # via
     #   chromadb
@@ -101,21 +97,17 @@ hf-xet==1.6.0
 httpcore==1.0.9
     # via httpx
 httptools==0.8.0
-    # via
-    #   streamlit
-    #   uvicorn
+    # via uvicorn
 httpx==0.28.1
     # via
     #   chromadb
     #   groq
     #   huggingface-hub
-    #   langchain-core
     #   langsmith
     #   openai
-httpx-sse==0.4.3
-    # via langchain-community
 huggingface-hub==1.29.0
     # via
+    #   langchain-huggingface
     #   sentence-transformers
     #   tokenizers
     #   transformers
@@ -127,50 +119,42 @@ idna==3.19
     #   yarl
 importlib-resources==7.1.0
     # via chromadb
-itsdangerous==2.2.0
-    # via streamlit
 jinja2==3.1.6
-    # via
-    #   altair
-    #   pydeck
-    #   torch
+    # via torch
 jiter==0.16.0
     # via openai
-joblib==1.6.0
+jmespath==1.1.0
+    # via
+    #   boto3
+    #   botocore
+joblib==1.5.3
     # via scikit-learn
 jsonpatch==1.33
     # via langchain-core
 jsonpointer==3.1.1
     # via jsonpatch
 jsonschema==4.26.0
-    # via
-    #   altair
-    #   chromadb
+    # via chromadb
 jsonschema-specifications==2025.9.1
     # via jsonschema
 kubernetes==36.0.3
     # via chromadb
 langchain-chroma==1.1.0
-    # via -r legacy_streamlit/requirements.in
-langchain-classic==1.0.8
-    # via langchain-community
-langchain-community==0.4.2
-    # via -r legacy_streamlit/requirements.in
-langchain-core==1.6.1
+    # via -r backend/requirements-full.in
+langchain-core==1.5.3
     # via
+    #   -r backend/requirements-full.in
     #   langchain-chroma
-    #   langchain-classic
-    #   langchain-community
+    #   langchain-huggingface
     #   langchain-text-splitters
+langchain-huggingface==1.2.2
+    # via -r backend/requirements-full.in
 langchain-protocol==0.0.19
     # via langchain-core
 langchain-text-splitters==1.1.2
-    # via langchain-classic
+    # via -r backend/requirements-full.in
 langsmith==0.11.2
-    # via
-    #   langchain-classic
-    #   langchain-community
-    #   langchain-core
+    # via langchain-core
 markdown-it-py==4.2.0
     # via rich
 markupsafe==3.0.3
@@ -186,71 +170,25 @@ multidict==6.7.1
     #   aiohttp
     #   yarl
 narwhals==2.25.0
-    # via
-    #   altair
-    #   scikit-learn
+    # via scikit-learn
 networkx==3.6.1
     # via torch
 numpy==2.4.6
     # via
+    #   -r backend/requirements.in
     #   chromadb
     #   langchain-chroma
-    #   langchain-community
     #   onnxruntime
-    #   pandas
-    #   pydeck
     #   scikit-learn
     #   scipy
     #   sentence-transformers
-    #   streamlit
     #   transformers
-nvidia-cublas==13.1.1.3
-    # via
-    #   cuda-toolkit
-    #   nvidia-cudnn-cu13
-    #   nvidia-cusolver
-nvidia-cuda-cupti==13.0.85
-    # via cuda-toolkit
-nvidia-cuda-nvrtc==13.0.88
-    # via
-    #   cuda-toolkit
-    #   nvidia-cublas
-nvidia-cuda-runtime==13.0.96
-    # via cuda-toolkit
-nvidia-cudnn-cu13==9.20.0.48
-    # via torch
-nvidia-cufft==12.0.0.61
-    # via cuda-toolkit
-nvidia-cufile==1.15.1.6
-    # via cuda-toolkit
-nvidia-curand==10.4.0.35
-    # via cuda-toolkit
-nvidia-cusolver==12.0.4.66
-    # via cuda-toolkit
-nvidia-cusparse==12.6.3.3
-    # via
-    #   cuda-toolkit
-    #   nvidia-cusolver
-nvidia-cusparselt-cu13==0.8.1
-    # via torch
-nvidia-nccl-cu13==2.29.7
-    # via torch
-nvidia-nvjitlink==13.3.33
-    # via
-    #   cuda-toolkit
-    #   nvidia-cufft
-    #   nvidia-cusolver
-    #   nvidia-cusparse
-nvidia-nvshmem-cu13==3.4.5
-    # via torch
-nvidia-nvtx==13.0.85
-    # via cuda-toolkit
 oauthlib==3.3.1
     # via requests-oauthlib
 onnxruntime==1.29.0
     # via chromadb
 openai==2.47.0
-    # via -r legacy_streamlit/requirements.in
+    # via -r backend/requirements.in
 opentelemetry-api==1.44.0
     # via
     #   chromadb
@@ -279,18 +217,12 @@ overrides==7.7.0
     # via chromadb
 packaging==26.3
     # via
-    #   altair
     #   build
     #   huggingface-hub
     #   langchain-core
     #   langsmith
     #   onnxruntime
-    #   streamlit
     #   transformers
-pandas==3.0.5
-    # via streamlit
-pillow==12.3.0
-    # via streamlit
 propcache==0.5.2
     # via
     #   aiohttp
@@ -300,18 +232,13 @@ protobuf==7.36.0
     #   googleapis-common-protos
     #   onnxruntime
     #   opentelemetry-proto
-    #   streamlit
-pyarrow==25.0.1
-    # via streamlit
 pybase64==1.5.0
     # via chromadb
-pycparser==3.0
-    # via cffi
 pydantic==2.13.5
     # via
     #   chromadb
+    #   fastapi
     #   groq
-    #   langchain-classic
     #   langchain-core
     #   langsmith
     #   openai
@@ -319,40 +246,39 @@ pydantic==2.13.5
 pydantic-core==2.46.5
     # via pydantic
 pydantic-settings==2.15.0
-    # via
-    #   chromadb
-    #   langchain-community
-pydeck==0.9.3
-    # via streamlit
+    # via chromadb
 pygments==2.21.0
     # via rich
 pypdf==6.16.2
-    # via -r legacy_streamlit/requirements.in
+    # via -r backend/requirements.in
 pypika==0.51.1
     # via chromadb
 pyproject-hooks==1.2.0
     # via build
 python-dateutil==2.9.0.post0
     # via
+    #   botocore
+    #   croniter
     #   kubernetes
-    #   pandas
 python-dotenv==1.2.2
     # via
-    #   -r legacy_streamlit/requirements.in
+    #   -r backend/requirements.in
     #   pydantic-settings
     #   uvicorn
 python-multipart==0.0.32
-    # via streamlit
+    # via -r backend/requirements.in
 pyyaml==6.0.3
     # via
     #   chromadb
     #   huggingface-hub
     #   kubernetes
-    #   langchain-classic
-    #   langchain-community
     #   langchain-core
     #   transformers
     #   uvicorn
+redis==8.1.0
+    # via
+    #   -r backend/requirements.in
+    #   rq
 referencing==0.37.0
     # via
     #   jsonschema
@@ -362,12 +288,9 @@ regex==2026.8.31
 requests==2.34.2
     # via
     #   kubernetes
-    #   langchain-classic
-    #   langchain-community
     #   langsmith
     #   requests-oauthlib
     #   requests-toolbelt
-    #   streamlit
 requests-oauthlib==2.0.0
     # via kubernetes
 requests-toolbelt==1.0.0
@@ -380,16 +303,22 @@ rpds-py==2026.6.3
     # via
     #   jsonschema
     #   referencing
+rq==2.10.0
+    # via -r backend/requirements.in
+s3transfer==0.19.2
+    # via boto3
 safetensors==0.8.0
     # via transformers
 scikit-learn==1.9.0
-    # via sentence-transformers
+    # via
+    #   -r backend/requirements.in
+    #   sentence-transformers
 scipy==1.17.1
     # via
     #   scikit-learn
     #   sentence-transformers
 sentence-transformers==5.7.0
-    # via -r legacy_streamlit/requirements.in
+    # via -r backend/requirements-full.in
 shellingham==1.5.4
     # via typer
 six==1.17.0
@@ -401,30 +330,22 @@ sniffio==1.3.1
     #   groq
     #   langsmith
     #   openai
-sqlalchemy==2.0.52
-    # via
-    #   langchain-classic
-    #   langchain-community
 starlette==1.6.0
-    # via streamlit
-streamlit==1.62.0
-    # via -r legacy_streamlit/requirements.in
+    # via fastapi
 sympy==1.14.0
     # via torch
 tenacity==9.1.4
     # via
     #   chromadb
-    #   langchain-community
     #   langchain-core
 threadpoolctl==3.6.0
     # via scikit-learn
 tokenizers==0.23.1
     # via
     #   chromadb
+    #   langchain-huggingface
     #   sentence-transformers
     #   transformers
-toml==0.10.2
-    # via streamlit
 torch==2.13.0
     # via sentence-transformers
 tqdm==4.70.0
@@ -436,8 +357,6 @@ tqdm==4.70.0
     #   transformers
 transformers==5.16.1
     # via sentence-transformers
-triton==3.7.1
-    # via torch
 typer==0.27.2
     # via
     #   chromadb
@@ -446,9 +365,9 @@ typing-extensions==4.16.0
     # via
     #   aiohttp
     #   aiosignal
-    #   altair
     #   anyio
     #   chromadb
+    #   fastapi
     #   groq
     #   grpcio
     #   huggingface-hub
@@ -464,39 +383,34 @@ typing-extensions==4.16.0
     #   pydantic-core
     #   referencing
     #   sentence-transformers
-    #   sqlalchemy
     #   starlette
-    #   streamlit
     #   torch
     #   typing-inspection
 typing-inspection==0.4.4
     # via
+    #   fastapi
     #   pydantic
     #   pydantic-settings
 urllib3==2.7.0
     # via
+    #   botocore
     #   kubernetes
     #   requests
 uuid-utils==0.17.0
     # via
     #   langchain-core
     #   langsmith
-uvicorn==0.52.4
+uvicorn==0.51.0
     # via
+    #   -r backend/requirements.in
     #   chromadb
-    #   streamlit
-uvloop==0.22.1
-    # via uvicorn
-watchdog==6.0.0
-    # via streamlit
 watchfiles==1.2.0
     # via uvicorn
 websocket-client==1.9.1
     # via kubernetes
-websockets==16.1.1
+websockets==17.1
     # via
     #   langsmith
-    #   streamlit
     #   uvicorn
 xxhash==4.0.1
     # via langsmith

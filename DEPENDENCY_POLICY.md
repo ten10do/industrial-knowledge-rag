@@ -9,12 +9,16 @@ to immutable commit SHAs rather than moving major-version tags.
 ## Lock files
 
 The `*.in` files contain reviewed direct dependencies. The generated `*.txt`
-files contain the exact transitive environment used by installs and CI:
+files contain exact transitive environments. Primary lock names target Linux;
+their `*-windows.txt` counterparts target Windows:
 
-- `backend/requirements.txt`: certified light-mode runtime and container.
-- `backend/requirements-full.txt`: optional local full RAG runtime.
-- `backend/requirements-dev.txt`: test, lock-generation, and audit tools.
-- `legacy_streamlit/requirements.txt`: isolated archived proof of concept.
+- `backend/requirements.txt`: certified Linux light runtime and container.
+- `backend/requirements-full.txt`: optional Linux full RAG runtime.
+- `backend/requirements-dev.txt`: Linux test, lock-generation, and audit tools.
+- `legacy_streamlit/requirements.txt`: isolated Linux archived prototype.
+- `backend/requirements-windows.txt`, `requirements-full-windows.txt`, and
+  `requirements-dev-windows.txt`: corresponding Windows environments.
+- `legacy_streamlit/requirements-windows.txt`: archived Windows prototype.
 
 Regenerate locks from the repository root with pip-tools 7.6.1:
 
@@ -23,8 +27,13 @@ Regenerate locks from the repository root with pip-tools 7.6.1:
     python -m piptools compile --quiet --no-header --resolver=backtracking --strip-extras --output-file=backend/requirements-dev.txt backend/requirements-dev.in
     python -m piptools compile --quiet --no-header --resolver=backtracking --strip-extras --output-file=legacy_streamlit/requirements.txt legacy_streamlit/requirements.in
 
-CI regenerates all four locks and fails on any diff. Python environments use
-`pip install -r <lock>`; the frontend uses `npm ci` with `package-lock.json`.
+Run those commands on Linux for the primary locks. On Windows, use the same
+commands with `requirements-windows.txt`, `requirements-full-windows.txt`,
+`requirements-dev-windows.txt`, and `legacy_streamlit/requirements-windows.txt`
+as their respective output files. CI regenerates the four Linux locks and fails
+on any diff; the policy checker verifies exact pins in all eight locks. Python
+environments use the lock matching their OS; the frontend uses `npm ci` with
+`package-lock.json`.
 
 ## Security gates and the Chroma exception
 

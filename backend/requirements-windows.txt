@@ -22,8 +22,8 @@ click==8.5.0
     # via
     #   rq
     #   uvicorn
-cloudpickle==3.1.2
-    # via joblib
+colorama==0.4.6
+    # via tqdm
 croniter==6.2.4
     # via rq
 distro==1.9.0
@@ -54,7 +54,7 @@ jmespath==1.1.0
     # via
     #   boto3
     #   botocore
-joblib==1.6.0
+joblib==1.5.3
     # via scikit-learn
 narwhals==2.25.0
     # via scikit-learn

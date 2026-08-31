@@ -61,7 +61,7 @@ Requirements: Python 3.11.16, Node.js 20.19+ or 22.12+ for local development, or
 Backend:
 
     python -m venv venv
-    .\venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+    .\venv\Scripts\python.exe -m pip install -r backend\requirements-windows.txt
     Copy-Item .env.example .env
     .\venv\Scripts\python.exe -m uvicorn backend.main:app --reload --port 8000
 
