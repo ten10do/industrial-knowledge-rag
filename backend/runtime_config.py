@@ -6,6 +6,7 @@ invalid values from being silently replaced by defaults during startup.
 """
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 from urllib.parse import urlparse
@@ -88,6 +89,7 @@ POSITIVE_FLOAT_SETTINGS = {
     "LIGHT_MAX_RELEVANT_DISTANCE",
     "FULL_MAX_RELEVANT_DISTANCE",
     "EVIDENCE_MAX_VECTOR_DISTANCE",
+    "EVIDENCE_CONTRACT_MAX_DISTANCE_RATIO",
 }
 NONNEGATIVE_FLOAT_SETTINGS = {"EVIDENCE_MIN_VECTOR_MARGIN"}
 
@@ -132,11 +134,17 @@ def _validate_numeric(name: str, *, integer: bool, minimum: float) -> None:
     raw = os.getenv(name)
     if raw is None or not raw.strip():
         return
+    kind = "integer" if integer else "number"
     try:
         value = int(raw) if integer else float(raw)
     except ValueError as exc:
-        kind = "integer" if integer else "number"
         raise RuntimeConfigurationError(f"{name} must be a valid {kind}.") from exc
+    # NaN and +/-Infinity are parseable by float() but must never reach
+    # retrieval / evidence thresholds. NaN also defeats the size check
+    # below (NaN < minimum is always False), so non-finite values must be
+    # rejected explicitly before any comparison.
+    if not math.isfinite(value):
+        raise RuntimeConfigurationError(f"{name} must be a finite {kind}.")
     if value < minimum:
         comparator = ">= 0" if minimum == 0 else "> 0"
         raise RuntimeConfigurationError(f"{name} must be {comparator}.")
