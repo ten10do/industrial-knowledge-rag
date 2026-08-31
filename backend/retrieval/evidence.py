@@ -87,6 +87,9 @@ class EvidencePolicy:
 
     max_vector_distance: float = 13.234710693359375
     min_vector_margin: float = 0.0
+    # V3.85: relative upper bound applied to the contract ANSWER branch only.
+    # None disables the bound and preserves pre-V3.85 decisions bit-for-bit.
+    contract_max_distance_ratio: float | None = None
 
 
 @dataclass(frozen=True)
@@ -114,9 +117,11 @@ class RetrievalEvidence:
 
 
 def default_policy() -> EvidencePolicy:
+    ratio_raw = os.getenv("EVIDENCE_CONTRACT_MAX_DISTANCE_RATIO", "").strip()
     return EvidencePolicy(
         max_vector_distance=float(os.getenv("EVIDENCE_MAX_VECTOR_DISTANCE", "13.234710693359375")),
         min_vector_margin=float(os.getenv("EVIDENCE_MIN_VECTOR_MARGIN", "0.0")),
+        contract_max_distance_ratio=float(ratio_raw) if ratio_raw else None,
     )
 
 
@@ -276,6 +281,24 @@ def _security_bypass_signal(query: str) -> bool:
         text,
     ) is not None
     return has_recovery and has_credential and has_no_access
+
+
+def _contract_distance_exceeded(vector_distance: float | None, policy: EvidencePolicy) -> bool:
+    """V3.85: bound the contract ANSWER branch by a relative retrieval distance.
+
+    The contract branch answers whenever every extracted critical requirement is
+    covered by the retrieved passages. A covered requirement set does not
+    establish support when the nearest passage sits far outside the calibrated
+    retrieval region, and that branch historically performed no retrieval
+    distance check at all. This helper applies an explicit relative bound.
+
+    Disabled when ``contract_max_distance_ratio`` is None, which is the default
+    and therefore preserves pre-V3.85 decisions exactly.
+    """
+    ratio = policy.contract_max_distance_ratio
+    if ratio is None or vector_distance is None:
+        return False
+    return vector_distance > policy.max_vector_distance * ratio
 
 
 def analyze_retrieval_evidence(
@@ -454,15 +477,20 @@ def analyze_retrieval_evidence(
     elif unsupported_detail:
         decision, reason = Decision.ABSTAIN, DecisionReason.INSUFFICIENT_EVIDENCE
     elif contract.has_critical_requirements:
-        decision = Decision.ANSWER
-        if exact_identifier:
-            reason = DecisionReason.EXACT_IDENTIFIER_EVIDENCE
-        elif identity_matching and relation == IdentityRelation.EXACT_MODEL:
-            reason = DecisionReason.EXACT_MODEL_EVIDENCE
-        elif identity_matching and relation in {IdentityRelation.SAME_SERIES, IdentityRelation.SAME_FAMILY}:
-            reason = DecisionReason.FAMILY_COMPATIBLE_EVIDENCE
+        if _contract_distance_exceeded(vector_distance, policy):
+            # V3.85: contract coverage alone is not sufficient support this far
+            # outside the calibrated retrieval region.
+            decision, reason = Decision.ABSTAIN, DecisionReason.WEAK_RETRIEVAL_EVIDENCE
         else:
-            reason = DecisionReason.CONTRACT_REQUIREMENTS_COVERED
+            decision = Decision.ANSWER
+            if exact_identifier:
+                reason = DecisionReason.EXACT_IDENTIFIER_EVIDENCE
+            elif identity_matching and relation == IdentityRelation.EXACT_MODEL:
+                reason = DecisionReason.EXACT_MODEL_EVIDENCE
+            elif identity_matching and relation in {IdentityRelation.SAME_SERIES, IdentityRelation.SAME_FAMILY}:
+                reason = DecisionReason.FAMILY_COMPATIBLE_EVIDENCE
+            else:
+                reason = DecisionReason.CONTRACT_REQUIREMENTS_COVERED
     elif exact_identifier:
         decision, reason = Decision.ANSWER, DecisionReason.EXACT_IDENTIFIER_EVIDENCE
     elif vector_distance is not None and vector_distance <= policy.max_vector_distance:
