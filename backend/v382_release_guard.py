@@ -32,7 +32,12 @@ SECRET_PATTERNS = (
 
 def _matches_frozen_file(path: Path, relative: str, expected: str) -> bool:
     current = path.read_bytes()
-    if hashlib.sha256(current).hexdigest() == expected:
+    normalized = current.replace(b"\r\n", b"\n")
+    line_ending_variants = (normalized, normalized.replace(b"\n", b"\r\n"))
+    if any(
+        hashlib.sha256(content).hexdigest() == expected
+        for content in line_ending_variants
+    ):
         return True
     frozen = subprocess.run(
         ["git", "show", f"{RESEARCH_FREEZE_COMMIT}:{relative}"],
@@ -42,9 +47,7 @@ def _matches_frozen_file(path: Path, relative: str, expected: str) -> bool:
     )
     if frozen.returncode != 0:
         return False
-    return current.replace(b"\r\n", b"\n") == frozen.stdout.replace(
-        b"\r\n", b"\n"
-    )
+    return normalized == frozen.stdout.replace(b"\r\n", b"\n")
 
 
 def load_manifest() -> dict:

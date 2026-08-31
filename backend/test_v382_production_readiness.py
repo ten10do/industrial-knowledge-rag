@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import subprocess
@@ -451,6 +452,11 @@ def test_research_freeze_and_private_artifact_guards_pass():
 def test_research_freeze_accepts_only_line_ending_differences(tmp_path):
     path = tmp_path / "frozen.py"
     path.write_bytes(b"first\r\nsecond\r\n")
+    lf_hash = hashlib.sha256(b"first\nsecond\n").hexdigest()
+    with patch("backend.v382_release_guard.subprocess.run") as git_show:
+        assert _matches_frozen_file(path, "moved.py", lf_hash)
+        git_show.assert_not_called()
+
     frozen = subprocess.CompletedProcess(args=[], returncode=0, stdout=b"first\nsecond\n")
     with patch("backend.v382_release_guard.subprocess.run", return_value=frozen):
         assert _matches_frozen_file(path, "frozen.py", "not-the-raw-hash")
