@@ -5,9 +5,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LOCKS = (
     ROOT / "backend" / "requirements.txt",
+    ROOT / "backend" / "requirements-windows.txt",
     ROOT / "backend" / "requirements-full.txt",
+    ROOT / "backend" / "requirements-full-windows.txt",
     ROOT / "backend" / "requirements-dev.txt",
+    ROOT / "backend" / "requirements-dev-windows.txt",
     ROOT / "legacy_streamlit" / "requirements.txt",
+    ROOT / "legacy_streamlit" / "requirements-windows.txt",
 )
 
 
@@ -31,8 +35,11 @@ def main() -> None:
 
     production_locks = (
         ROOT / "backend" / "requirements.txt",
+        ROOT / "backend" / "requirements-windows.txt",
         ROOT / "backend" / "requirements-full.txt",
+        ROOT / "backend" / "requirements-full-windows.txt",
         ROOT / "backend" / "requirements-dev.txt",
+        ROOT / "backend" / "requirements-dev-windows.txt",
     )
     for lock in production_locks:
         if lock.is_file() and any(

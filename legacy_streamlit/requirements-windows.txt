@@ -51,16 +51,13 @@ click==8.5.0
     #   huggingface-hub
     #   streamlit
     #   uvicorn
-cloudpickle==3.1.2
-    # via joblib
+colorama==0.4.6
+    # via
+    #   build
+    #   tqdm
+    #   typer
 cryptography==50.0.1
     # via pypdf
-cuda-bindings==13.3.1
-    # via torch
-cuda-pathfinder==1.8.0
-    # via cuda-bindings
-cuda-toolkit==13.0.3.0
-    # via torch
 distro==1.9.0
     # via
     #   groq
@@ -136,7 +133,7 @@ jinja2==3.1.6
     #   torch
 jiter==0.16.0
     # via openai
-joblib==1.6.0
+joblib==1.5.3
     # via scikit-learn
 jsonpatch==1.33
     # via langchain-core
@@ -204,47 +201,6 @@ numpy==2.4.6
     #   sentence-transformers
     #   streamlit
     #   transformers
-nvidia-cublas==13.1.1.3
-    # via
-    #   cuda-toolkit
-    #   nvidia-cudnn-cu13
-    #   nvidia-cusolver
-nvidia-cuda-cupti==13.0.85
-    # via cuda-toolkit
-nvidia-cuda-nvrtc==13.0.88
-    # via
-    #   cuda-toolkit
-    #   nvidia-cublas
-nvidia-cuda-runtime==13.0.96
-    # via cuda-toolkit
-nvidia-cudnn-cu13==9.20.0.48
-    # via torch
-nvidia-cufft==12.0.0.61
-    # via cuda-toolkit
-nvidia-cufile==1.15.1.6
-    # via cuda-toolkit
-nvidia-curand==10.4.0.35
-    # via cuda-toolkit
-nvidia-cusolver==12.0.4.66
-    # via cuda-toolkit
-nvidia-cusparse==12.6.3.3
-    # via
-    #   cuda-toolkit
-    #   nvidia-cusolver
-nvidia-cusparselt-cu13==0.8.1
-    # via torch
-nvidia-nccl-cu13==2.29.7
-    # via torch
-nvidia-nvjitlink==13.3.33
-    # via
-    #   cuda-toolkit
-    #   nvidia-cufft
-    #   nvidia-cusolver
-    #   nvidia-cusparse
-nvidia-nvshmem-cu13==3.4.5
-    # via torch
-nvidia-nvtx==13.0.85
-    # via cuda-toolkit
 oauthlib==3.3.1
     # via requests-oauthlib
 onnxruntime==1.29.0
@@ -436,8 +392,6 @@ tqdm==4.70.0
     #   transformers
 transformers==5.16.1
     # via sentence-transformers
-triton==3.7.1
-    # via torch
 typer==0.27.2
     # via
     #   chromadb
@@ -473,6 +427,8 @@ typing-inspection==0.4.4
     # via
     #   pydantic
     #   pydantic-settings
+tzdata==2026.3
+    # via pandas
 urllib3==2.7.0
     # via
     #   kubernetes
@@ -485,8 +441,6 @@ uvicorn==0.52.4
     # via
     #   chromadb
     #   streamlit
-uvloop==0.22.1
-    # via uvicorn
 watchdog==6.0.0
     # via streamlit
 watchfiles==1.2.0

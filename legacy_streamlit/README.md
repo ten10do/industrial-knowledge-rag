@@ -5,7 +5,7 @@ This directory preserves the original Streamlit proof of concept for historical 
 Use the repository root `README.md` for the supported application. If the prototype must be inspected locally, install its exact lock file in an isolated environment and run it from this directory:
 
 ```powershell
-python -m pip install -r legacy_streamlit\requirements.txt
+python -m pip install -r legacy_streamlit\requirements-windows.txt
 streamlit run legacy_streamlit\app.py
 ```
 
