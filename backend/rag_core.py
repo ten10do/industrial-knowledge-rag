@@ -7,9 +7,10 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from langchain_chroma import Chroma
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_core.documents import Document
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pypdf import PdfReader
 
 if __package__:
     from .ingestion import PageText, ingest_pages
@@ -45,19 +46,27 @@ DEFAULT_RRF_K = 60
 
 
 def load_pdf(file_path: str | os.PathLike):
-    loader = PyPDFLoader(str(file_path))
-    documents = loader.load()
-    documents = [
-        doc for doc in documents
-        if doc.page_content and doc.page_content.strip()
-    ]
-
+    reader = PdfReader(str(file_path))
     source_name = Path(file_path).name
-    for page_number, doc in enumerate(documents):
-        doc.metadata["source"] = source_name
-        doc.metadata.setdefault("page", page_number)
-        doc.metadata["_file_path"] = str(file_path)
-
+    total_pages = len(reader.pages)
+    page_labels = reader.page_labels
+    documents = []
+    for page_number, page in enumerate(reader.pages):
+        page_content = (page.extract_text() or "").strip()
+        if not page_content:
+            continue
+        documents.append(
+            Document(
+                page_content=page_content,
+                metadata={
+                    "source": source_name,
+                    "page": page_number,
+                    "page_label": page_labels[page_number],
+                    "total_pages": total_pages,
+                    "_file_path": str(file_path),
+                },
+            )
+        )
     return documents
 
 
@@ -93,25 +102,13 @@ def split_documents(documents):
         pages,
         fallback_splitter=recursive_fallback,
     )
-    try:
-        from langchain_core.documents import Document
-    except ImportError:
-        document_type = type(documents[0])
-        chunks = [
-            document_type(
-                page_content=chunk.page_content,
-                metadata=chunk.metadata,
-            )
-            for chunk in industrial_chunks
-        ]
-    else:
-        chunks = [
-            Document(
-                page_content=chunk.page_content,
-                metadata=chunk.metadata,
-            )
-            for chunk in industrial_chunks
-        ]
+    chunks = [
+        Document(
+            page_content=chunk.page_content,
+            metadata=chunk.metadata,
+        )
+        for chunk in industrial_chunks
+    ]
 
     if not chunks:
         raise ValueError("PDF 切分后没有得到有效文本块。")
@@ -212,8 +209,6 @@ def _serialize_chunks(chunks) -> list[dict]:
 
 
 def _deserialize_chunks(payload):
-    from langchain_core.documents import Document
-
     return [
         Document(
             page_content=item["page_content"],

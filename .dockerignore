@@ -10,6 +10,7 @@ venv
 data
 results
 screenshots
+legacy_streamlit
 vector_db
 vector_db_v369
 backend/data

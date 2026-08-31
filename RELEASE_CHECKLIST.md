@@ -4,6 +4,10 @@ RC identifier: **industrial-knowledge-rag V3.84 local RC**
 
 This checklist packages the deployment-validated development RC. It is not a Git tag, public release, enterprise production certification, SLA, security audit or HA claim.
 
+This document is historical V3.84 evidence. Later V3.85 changes and dependency
+hardening have local verification only; they require a new exact-SHA remote CI
+run and container build before this checklist can be used for a new release.
+
 | Gate | State | Evidence |
 |---|---|---|
 | V3.83 RC manifest present and internally consistent | PASS | V383_RELEASE_CANDIDATE_MANIFEST.json; source input hashes rechecked |
@@ -31,7 +35,7 @@ This checklist packages the deployment-validated development RC. It is not a Git
 | Known limitations current | PASS | KNOWN_LIMITATIONS.md |
 | Deployment/runbook docs current | PASS | DEPLOYMENT.md, DEPLOYMENT_VALIDATION.md, OPERATIONS_RUNBOOK.md |
 | Optional provider capability | OPTIONAL_NOT_VALIDATED | authorized real provider unavailable in formal certified container |
-| Remote CI execution | PASS | run `33156355678`, exact SHA `5df4ef42efc0d9e9922087a763aa65ba92dd8c4a`, all four jobs successful |
+| Remote CI execution | PASS / HISTORICAL | V3.84 run `33156355678`, exact SHA `5df4ef42efc0d9e9922087a763aa65ba92dd8c4a`, all four jobs successful; not evidence for the current working tree |
 | Container P95 follow-up | NON_BLOCKING_KNOWN_LIMITATION | CONTAINER_PERFORMANCE_INVESTIGATION_REQUIRED |
 | Git tag / remote release | NOT_PERFORMED | owner authorization required |
 
@@ -39,4 +43,6 @@ Release-candidate package gate: **PASS**.
 
 Project-evidence package gate: **PASS**.
 
-Final local status: **V3_84_RC_PROJECT_EVIDENCE_READY**.
+Final V3.84 package status: **V3_84_RC_PROJECT_EVIDENCE_READY**.
+
+Current working-tree release status: **EXACT_SHA_REMOTE_CI_REQUIRED**.

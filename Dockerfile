@@ -1,4 +1,6 @@
-FROM python:3.11-slim
+FROM python:3.11.16-slim-trixie@sha256:1042b61448fef4ba92d16a8c7eb4996d027568ce64792a7877fd88511e0af7c6
+
+ARG PIP_VERSION=26.2.1
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -7,7 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY backend/requirements.txt /app/backend/requirements.txt
-RUN python -m pip install --upgrade pip \
+RUN python -m pip install "pip==${PIP_VERSION}" \
     && python -m pip install -r /app/backend/requirements.txt
 
 COPY backend /app/backend
