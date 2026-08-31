@@ -88,7 +88,7 @@
   "backend/retrieval/evidence_contract.py": "8819b595d57b415b687d860df837419abd356b9782b2f382c6a7123cdfeb858d",
   "backend/retrieval/evidence_querytype.py": "cd2eaa6abc70139d50eb093a34daf32c9856725134073b8b5e453bae098ad4ec",
   "legacy_streamlit/rag_core.py": "302ea358e005bebb086c1684871218ab3c42da9c34889f8d00eae4c165b89cca",
-  "backend/rag_core.py": "ff809dd9429d642e51d8d0e19ddf183623ecda946e8d0e5db37b203863da9a37",
+  "backend/rag_core.py": "36c75234b72c39af040d47aa9b74857f4d95d9bec60bebdbbfef9bb467f8cac2",
   "backend/light_rag_core.py": "2f0804fc6507c0751e2e7acb640652b5c1fa702c4dac4372eb5b8fb6b016da61",
   "backend/retrieval/candidates.py": "46db6d7c30ed334adee819c68e59ab5232b12405d2c6b0774db2fac37eadf584",
   "backend/retrieval/fusion.py": "2924b0612f779ce820d318c9fe87a18610589e234afb369cdcf06dc0f2c31cbe",
