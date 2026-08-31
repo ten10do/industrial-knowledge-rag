@@ -4,9 +4,9 @@ RC identifier: **industrial-knowledge-rag V3.84 local RC**
 
 This checklist packages the deployment-validated development RC. It is not a Git tag, public release, enterprise production certification, SLA, security audit or HA claim.
 
-This document is historical V3.84 evidence. Later V3.85 changes and dependency
-hardening have local verification only; they require a new exact-SHA remote CI
-run and container build before this checklist can be used for a new release.
+This document retains the historical V3.84 evidence and records the later
+dependency-hardening gate. The hardened implementation passed exact-SHA remote
+CI, including a fresh container build, in run `33383812442`.
 
 | Gate | State | Evidence |
 |---|---|---|
@@ -36,6 +36,7 @@ run and container build before this checklist can be used for a new release.
 | Deployment/runbook docs current | PASS | DEPLOYMENT.md, DEPLOYMENT_VALIDATION.md, OPERATIONS_RUNBOOK.md |
 | Optional provider capability | OPTIONAL_NOT_VALIDATED | authorized real provider unavailable in formal certified container |
 | Remote CI execution | PASS / HISTORICAL | V3.84 run `33156355678`, exact SHA `5df4ef42efc0d9e9922087a763aa65ba92dd8c4a`, all four jobs successful; not evidence for the current working tree |
+| Dependency-hardening CI | PASS | run `33383812442`, exact SHA `61f31a8ab4028e51548068d86a75c09a04c6c9ae`; Linux lock regeneration/audit, backend, full import, frontend, Compose and image build passed |
 | Container P95 follow-up | NON_BLOCKING_KNOWN_LIMITATION | CONTAINER_PERFORMANCE_INVESTIGATION_REQUIRED |
 | Git tag / remote release | NOT_PERFORMED | owner authorization required |
 
@@ -45,4 +46,4 @@ Project-evidence package gate: **PASS**.
 
 Final V3.84 package status: **V3_84_RC_PROJECT_EVIDENCE_READY**.
 
-Current working-tree release status: **EXACT_SHA_REMOTE_CI_REQUIRED**.
+Dependency-hardened implementation status: **EXACT_SHA_REMOTE_CI_PASS**.

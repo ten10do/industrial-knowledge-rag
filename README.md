@@ -118,11 +118,13 @@ It demonstrates liveness/readiness/metrics, a supported answerability decision, 
 The public CI workflow regenerates and verifies dependency locks, audits Python
 and frontend dependencies, runs backend tests, the public operational smoke,
 offline public evaluation, a full-dependency import smoke, frontend tests/build,
-Compose validation, and an image build. The last published V3.84 evidence is
-exact SHA `5df4ef42efc0d9e9922087a763aa65ba92dd8c4a` in
+Compose validation, and an image build. The dependency-hardened implementation
+passed all four jobs for exact SHA
+`61f31a8ab4028e51548068d86a75c09a04c6c9ae` in
+[run 33383812442](https://github.com/ten10do/industrial-knowledge-rag/actions/runs/33383812442).
+The earlier V3.84 package remains historical evidence at exact SHA
+`5df4ef42efc0d9e9922087a763aa65ba92dd8c4a` in
 [run 33156355678](https://github.com/ten10do/industrial-knowledge-rag/actions/runs/33156355678).
-It is historical evidence only: the current uncommitted working tree has no
-exact-SHA remote CI result and must obtain one before release.
 
 ## Evaluation boundary
 
