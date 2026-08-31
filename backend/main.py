@@ -1674,6 +1674,11 @@ def ready(
     knowledge_base_id: str = Depends(require_knowledge_base_id),
 ):
     """Mode-aware readiness. 200 only when all REQUIRED dependencies pass."""
+    # READY_RATE_LIMIT contract: /ready must be gated like /health. The limit
+    # is enforced BEFORE evaluate_readiness so that rate-limited probes never
+    # trigger the per-request index read/parse (light mode re-reads the whole
+    # index JSON on every check, see index_integrity.validate_light_index).
+    enforce_rate_limit(request, knowledge_base_id, "ready")
     report = evaluate_readiness(
         effective_rag_mode=EFFECTIVE_RAG_MODE,
         knowledge_base_id=knowledge_base_id,

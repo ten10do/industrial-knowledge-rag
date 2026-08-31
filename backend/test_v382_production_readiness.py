@@ -24,6 +24,7 @@ from backend.runtime_config import (
     RuntimeConfigurationError,
     validate_runtime_environment,
 )
+from backend.security import FixedWindowRateLimiter
 from backend.v382_release_guard import (
     _matches_frozen_file,
     audit_tracked_private_files,
@@ -147,6 +148,34 @@ def test_liveness_is_process_only_even_if_dependency_probe_would_fail():
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     assert "private path" not in response.text
+
+
+def test_ready_enforces_rate_limit_contract(monkeypatch):
+    """READY_RATE_LIMIT must actually gate /ready (config contract).
+
+    Regression: /ready previously skipped enforce_rate_limit(), so the
+    configured bucket was dead config and repeated probes could replay the
+    full light-index read/parse. With READY_RATE_LIMIT=1 the second request
+    from the same client+knowledge base must be rejected with 429, proving
+    the limit is enforced before any readiness evaluation.
+    """
+    fresh_limiter = FixedWindowRateLimiter()
+    monkeypatch.setattr(main, "rate_limiter", fresh_limiter)
+    monkeypatch.setitem(main.RATE_LIMITS, "ready", (1, 60))
+    knowledge_base_id = "kb-rate-limit-ready-00000001"
+    client = TestClient(main.app)
+
+    first = client.get("/ready", headers={"X-Knowledge-Base-ID": knowledge_base_id})
+    # dependency state is irrelevant: readiness may be 200 or 503, but the
+    # request must consume one token and return the governance headers.
+    # httpx normalizes header names to lowercase, so match case-insensitively.
+    assert first.status_code in (200, 503)
+    assert any(key.lower().startswith("x-ratelimit") for key in first.headers)
+
+    second = client.get("/ready", headers={"X-Knowledge-Base-ID": knowledge_base_id})
+    assert second.status_code == 429
+    assert "Retry-After" in second.headers
+    assert any(key.lower().startswith("x-ratelimit") for key in second.headers)
 
 
 def test_readiness_fails_for_missing_index_without_leaking_absolute_path(monkeypatch, tmp_path):
