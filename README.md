@@ -6,14 +6,17 @@ The project is intentionally evidence-first. Retrieval proposes candidate passag
 
 ## Release candidate status
 
-**V3.84 release-candidate packaging. Runtime and research semantics are frozen.**
+**V3.84 is the last formally packaged release candidate. The current working
+tree adds later V3.85 experiments/fixes and dependency hardening while keeping
+the frozen correctness baseline unchanged.**
 
 | Area | Current evidence |
 |---|---|
 | Correctness authority | V377 aligned private benchmark, contract-native V3.67 evaluator |
 | Frozen result | 54/69 correct, 9 false answers, 3 false refusals, 78.26% accuracy; AR 76.92%, AbR 79.07% |
 | Safety slice | 10/10 hard negatives handled correctly |
-| Regression suite | 948 backend tests passed, 2 skipped; 34/34 frontend tests passed; frontend build passed |
+| Current local regression | 972 backend tests passed, 2 skipped, plus 5 subtests; 34/34 frontend tests passed; frontend build passed |
+| Dependency security | Certified light runtime: 0 known vulnerabilities; frontend: 0; optional full runtime: 4 explicitly bounded Chroma advisories with no fixed release |
 | Deployment | Docker Compose image, non-root runtime, readiness, restart, persistence, recreation, shutdown, load and privacy gates passed |
 | Long-run stability | 600.12-second native soak, 11,678 requests, 0 errors |
 | Freeze/private boundary | 28/28 protected hashes passed; tracked private files: 0 |
@@ -53,7 +56,7 @@ See [Feature Status](FEATURE_STATUS.md) for the exact implemented, experimental,
 
 ## Quick start
 
-Requirements: Python 3.11+, Node.js 20+ for local development, or Docker Desktop/Engine with Compose.
+Requirements: Python 3.11.16, Node.js 20.19+ or 22.12+ for local development, or Docker Desktop/Engine with Compose. CI uses Node.js 24.18.0.
 
 Backend:
 
@@ -103,6 +106,7 @@ It demonstrates liveness/readiness/metrics, a supported answerability decision, 
 ## Verification
 
     .\venv\Scripts\python.exe -m backend.v382_release_guard
+    .\venv\Scripts\python.exe scripts\verify_dependency_policy.py
     .\venv\Scripts\python.exe -m pytest backend -v
     .\venv\Scripts\python.exe scripts\v384_public_demo.py
     .\venv\Scripts\python.exe -m backend.evaluation.run
@@ -111,7 +115,14 @@ It demonstrates liveness/readiness/metrics, a supported answerability decision, 
     npm run test
     npm run build
 
-The public CI workflow runs backend tests, the public operational smoke, offline public evaluation, a full-dependency import smoke, frontend tests/build, Compose validation, and an image build. GitHub Actions completed successfully for exact SHA `5df4ef42efc0d9e9922087a763aa65ba92dd8c4a` in [run 33156355678](https://github.com/ten10do/industrial-knowledge-rag/actions/runs/33156355678); every new public HEAD requires its own exact-SHA result.
+The public CI workflow regenerates and verifies dependency locks, audits Python
+and frontend dependencies, runs backend tests, the public operational smoke,
+offline public evaluation, a full-dependency import smoke, frontend tests/build,
+Compose validation, and an image build. The last published V3.84 evidence is
+exact SHA `5df4ef42efc0d9e9922087a763aa65ba92dd8c4a` in
+[run 33156355678](https://github.com/ten10do/industrial-knowledge-rag/actions/runs/33156355678).
+It is historical evidence only: the current uncommitted working tree has no
+exact-SHA remote CI result and must obtain one before release.
 
 ## Evaluation boundary
 
@@ -134,6 +145,7 @@ The container image excludes tests, offline evaluation assets, local results, PD
 ## Documentation map
 
 - [Architecture](ARCHITECTURE.md)
+- [Dependency Security and Reproducibility](DEPENDENCY_POLICY.md)
 - [Evaluation](EVALUATION.md)
 - [Research Decisions](RESEARCH_DECISIONS.md)
 - [Feature Status](FEATURE_STATUS.md)
@@ -146,6 +158,7 @@ The container image excludes tests, offline evaluation assets, local results, PD
 - [Release Checklist](RELEASE_CHECKLIST.md)
 - [Known Limitations](KNOWN_LIMITATIONS.md)
 - [Historical Research Index](docs/research/README.md)
+- [Archived Streamlit Prototype](legacy_streamlit/README.md)
 
 ## If you only have 5 minutes
 

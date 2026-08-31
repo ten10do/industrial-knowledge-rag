@@ -15,11 +15,7 @@ from fastapi.testclient import TestClient
 sys.modules.setdefault("dotenv", types.SimpleNamespace(load_dotenv=lambda *args, **kwargs: None))
 sys.modules.setdefault("langchain_chroma", types.SimpleNamespace(Chroma=object))
 sys.modules.setdefault(
-    "langchain_community.document_loaders",
-    types.SimpleNamespace(PyPDFLoader=object),
-)
-sys.modules.setdefault(
-    "langchain_community.embeddings",
+    "langchain_huggingface",
     types.SimpleNamespace(HuggingFaceEmbeddings=object),
 )
 sys.modules.setdefault(

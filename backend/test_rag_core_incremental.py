@@ -16,11 +16,7 @@ sys.modules.setdefault(
     types.SimpleNamespace(Chroma=object),
 )
 sys.modules.setdefault(
-    "langchain_community.document_loaders",
-    types.SimpleNamespace(PyPDFLoader=object),
-)
-sys.modules.setdefault(
-    "langchain_community.embeddings",
+    "langchain_huggingface",
     types.SimpleNamespace(HuggingFaceEmbeddings=object),
 )
 sys.modules.setdefault(
@@ -33,6 +29,42 @@ sys.modules.setdefault(
 )
 
 from backend import rag_core
+
+
+def test_load_pdf_uses_pypdf_and_preserves_original_page_numbers(
+    tmp_path,
+    monkeypatch,
+):
+    pdf_path = tmp_path / "manual.pdf"
+    pdf_path.write_bytes(b"%PDF-test")
+
+    class Page:
+        def __init__(self, text):
+            self.text = text
+
+        def extract_text(self):
+            return self.text
+
+    class Reader:
+        pages = [Page(" first page "), Page(""), Page("third page")]
+        page_labels = ["1", "2", "3"]
+
+    monkeypatch.setattr(rag_core, "PdfReader", lambda _path: Reader())
+
+    documents = rag_core.load_pdf(pdf_path)
+
+    assert [document.page_content for document in documents] == [
+        "first page",
+        "third page",
+    ]
+    assert [document.metadata["page"] for document in documents] == [0, 2]
+    assert documents[0].metadata == {
+        "source": "manual.pdf",
+        "page": 0,
+        "page_label": "1",
+        "total_pages": 3,
+        "_file_path": str(pdf_path),
+    }
 
 
 class FakeChroma:
