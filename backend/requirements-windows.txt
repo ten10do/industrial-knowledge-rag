@@ -8,7 +8,7 @@ anyio==4.14.2
     #   httpx
     #   openai
     #   starlette
-boto3==1.43.67
+boto3==1.43.83
     # via -r backend/requirements.in
 botocore==1.43.83
     # via
@@ -30,9 +30,9 @@ distro==1.9.0
     # via
     #   groq
     #   openai
-fastapi==0.139.2
+fastapi==0.141.1
     # via -r backend/requirements.in
-groq==1.5.0
+groq==1.7.0
     # via -r backend/requirements.in
 h11==0.16.0
     # via
@@ -63,14 +63,14 @@ numpy==2.4.6
     #   -r backend/requirements.in
     #   scikit-learn
     #   scipy
-openai==2.47.0
+openai==3.6.0
     # via -r backend/requirements.in
 pydantic==2.13.5
     # via
     #   fastapi
     #   groq
     #   openai
-pydantic-core==2.46.5
+pydantic-core==2.48.0
     # via pydantic
 pypdf==6.16.2
     # via -r backend/requirements.in
@@ -78,7 +78,7 @@ python-dateutil==2.9.0.post0
     # via
     #   botocore
     #   croniter
-python-dotenv==1.2.2
+python-dotenv==1.2.3
     # via -r backend/requirements.in
 python-multipart==0.0.32
     # via -r backend/requirements.in
@@ -86,7 +86,7 @@ redis==8.1.0
     # via
     #   -r backend/requirements.in
     #   rq
-rq==2.10.0
+rq==2.11.0
     # via -r backend/requirements.in
 s3transfer==0.19.2
     # via boto3
@@ -122,5 +122,5 @@ typing-inspection==0.4.4
     #   pydantic
 urllib3==2.7.0
     # via botocore
-uvicorn==0.51.0
+uvicorn==0.52.4
     # via -r backend/requirements.in

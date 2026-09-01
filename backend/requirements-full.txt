@@ -14,6 +14,7 @@ anyio==4.14.2
     # via
     #   groq
     #   httpx
+    #   httpx2
     #   langsmith
     #   openai
     #   starlette
@@ -25,8 +26,8 @@ attrs==26.1.0
     #   referencing
 bcrypt==5.0.0
     # via chromadb
-boto3==1.43.67
-    # via -r backend/requirements.in
+boto3==1.43.83
+    # via -r requirements.in
 botocore==1.43.83
     # via
     #   boto3
@@ -43,7 +44,7 @@ charset-normalizer==3.5.1
     # via requests
 chromadb==1.5.9
     # via
-    #   -r backend/requirements-full.in
+    #   -r requirements-full.in
     #   langchain-chroma
 click==8.5.0
     # via
@@ -58,17 +59,16 @@ cuda-bindings==13.3.1
     # via torch
 cuda-pathfinder==1.8.0
     # via cuda-bindings
-cuda-toolkit==13.0.3.0
+cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3.0
     # via torch
 distro==1.9.0
     # via
     #   groq
     #   langsmith
-    #   openai
 durationpy==0.11
     # via kubernetes
-fastapi==0.139.2
-    # via -r backend/requirements.in
+fastapi==0.141.1
+    # via -r requirements.in
 filelock==3.32.4
     # via
     #   huggingface-hub
@@ -85,8 +85,8 @@ fsspec==2026.7.0
     #   torch
 googleapis-common-protos==1.75.2
     # via opentelemetry-exporter-otlp-proto-grpc
-groq==1.5.0
-    # via -r backend/requirements.in
+groq==1.7.0
+    # via -r requirements.in
 grpcio==1.83.1
     # via
     #   chromadb
@@ -94,11 +94,14 @@ grpcio==1.83.1
 h11==0.16.0
     # via
     #   httpcore
+    #   httpcore2
     #   uvicorn
 hf-xet==1.6.0
     # via huggingface-hub
 httpcore==1.0.9
     # via httpx
+httpcore2==2.12.0
+    # via httpx2
 httptools==0.8.0
     # via uvicorn
 httpx==0.28.1
@@ -106,8 +109,10 @@ httpx==0.28.1
     #   chromadb
     #   groq
     #   huggingface-hub
+    #   langchain-core
     #   langsmith
-    #   openai
+httpx2==2.12.0
+    # via openai
 huggingface-hub==1.29.0
     # via
     #   langchain-huggingface
@@ -118,6 +123,7 @@ idna==3.19
     # via
     #   anyio
     #   httpx
+    #   httpx2
     #   requests
     #   yarl
 importlib-resources==7.1.0
@@ -143,19 +149,19 @@ jsonschema-specifications==2025.9.1
 kubernetes==36.0.3
     # via chromadb
 langchain-chroma==1.1.0
-    # via -r backend/requirements-full.in
-langchain-core==1.5.3
+    # via -r requirements-full.in
+langchain-core==1.6.1
     # via
-    #   -r backend/requirements-full.in
+    #   -r requirements-full.in
     #   langchain-chroma
     #   langchain-huggingface
     #   langchain-text-splitters
 langchain-huggingface==1.2.2
-    # via -r backend/requirements-full.in
+    # via -r requirements-full.in
 langchain-protocol==0.0.19
     # via langchain-core
 langchain-text-splitters==1.1.2
-    # via -r backend/requirements-full.in
+    # via -r requirements-full.in
 langsmith==0.11.2
     # via langchain-core
 markdown-it-py==4.2.0
@@ -178,7 +184,7 @@ networkx==3.6.1
     # via torch
 numpy==2.4.6
     # via
-    #   -r backend/requirements.in
+    #   -r requirements.in
     #   chromadb
     #   langchain-chroma
     #   onnxruntime
@@ -231,8 +237,8 @@ oauthlib==3.3.1
     # via requests-oauthlib
 onnxruntime==1.29.0
     # via chromadb
-openai==2.47.0
-    # via -r backend/requirements.in
+openai==3.6.0
+    # via -r requirements.in
 opentelemetry-api==1.44.0
     # via
     #   chromadb
@@ -294,7 +300,7 @@ pydantic-settings==2.15.0
 pygments==2.21.0
     # via rich
 pypdf==6.16.2
-    # via -r backend/requirements.in
+    # via -r requirements.in
 pypika==0.51.1
     # via chromadb
 pyproject-hooks==1.2.0
@@ -304,13 +310,13 @@ python-dateutil==2.9.0.post0
     #   botocore
     #   croniter
     #   kubernetes
-python-dotenv==1.2.2
+python-dotenv==1.2.3
     # via
-    #   -r backend/requirements.in
+    #   -r requirements.in
     #   pydantic-settings
     #   uvicorn
 python-multipart==0.0.32
-    # via -r backend/requirements.in
+    # via -r requirements.in
 pyyaml==6.0.3
     # via
     #   chromadb
@@ -321,7 +327,7 @@ pyyaml==6.0.3
     #   uvicorn
 redis==8.1.0
     # via
-    #   -r backend/requirements.in
+    #   -r requirements.in
     #   rq
 referencing==0.37.0
     # via
@@ -347,22 +353,22 @@ rpds-py==2026.6.3
     # via
     #   jsonschema
     #   referencing
-rq==2.10.0
-    # via -r backend/requirements.in
+rq==2.11.0
+    # via -r requirements.in
 s3transfer==0.19.2
     # via boto3
 safetensors==0.8.0
     # via transformers
 scikit-learn==1.9.0
     # via
-    #   -r backend/requirements.in
+    #   -r requirements.in
     #   sentence-transformers
 scipy==1.17.1
     # via
     #   scikit-learn
     #   sentence-transformers
-sentence-transformers==5.7.0
-    # via -r backend/requirements-full.in
+sentence-transformers==6.0.0
+    # via -r requirements-full.in
 shellingham==1.5.4
     # via typer
 six==1.17.0
@@ -396,13 +402,16 @@ tqdm==4.70.0
     # via
     #   chromadb
     #   huggingface-hub
-    #   openai
     #   sentence-transformers
     #   transformers
 transformers==5.16.1
     # via sentence-transformers
 triton==3.7.1
     # via torch
+truststore==0.10.4
+    # via
+    #   httpcore2
+    #   httpx2
 typer==0.27.2
     # via
     #   chromadb
@@ -416,6 +425,7 @@ typing-extensions==4.16.0
     #   fastapi
     #   groq
     #   grpcio
+    #   httpx2
     #   huggingface-hub
     #   langchain-core
     #   langchain-protocol
@@ -446,9 +456,9 @@ uuid-utils==0.17.0
     # via
     #   langchain-core
     #   langsmith
-uvicorn==0.51.0
+uvicorn[standard]==0.52.4
     # via
-    #   -r backend/requirements.in
+    #   -r requirements.in
     #   chromadb
 uvloop==0.22.1
     # via uvicorn
