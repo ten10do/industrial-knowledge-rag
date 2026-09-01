@@ -136,7 +136,6 @@ class FastApiBackendTests(unittest.TestCase):
             "loaded_version": "version-2",
             "last_checked_at": "2026-07-28T08:00:00+00:00",
             "last_success_at": "2026-07-28T08:00:00+00:00",
-            "last_error": "",
         }
         with patch.object(
             main_module,
@@ -149,7 +148,7 @@ class FastApiBackendTests(unittest.TestCase):
             ):
                 with patch.object(
                     main_module.public_version_synchronizer,
-                    "status",
+                    "public_status",
                     return_value=sync_status,
                 ):
                     response = client.get("/health")

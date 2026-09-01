@@ -143,6 +143,17 @@ class PublicVersionSynchronizer:
                 "last_error": self.last_error,
             }
 
+    def public_status(self) -> dict:
+        """Return synchronization health without internal exception details."""
+        status = self.status()
+        return {
+            "status": status["status"],
+            "remote_active_version": status["remote_active_version"],
+            "loaded_version": status["loaded_version"],
+            "last_checked_at": status["last_checked_at"],
+            "last_success_at": status["last_success_at"],
+        }
+
     def start(self) -> None:
         with self.state_lock:
             if self.started:

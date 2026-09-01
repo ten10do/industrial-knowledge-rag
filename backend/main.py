@@ -1642,11 +1642,22 @@ def health(
             "reason": RAG_MODE_FALLBACK_REASON,
         }
     if knowledge_base_id == PUBLIC_KNOWLEDGE_BASE_ID:
-        sync_status = public_version_synchronizer.status()
+        sync_status = public_version_synchronizer.public_status()
         response["version_sync"] = sync_status
+        rate_limit_health = rate_limiter.health()
+        model_quota_health = llm_module.model_governor.health()
         governance = {
-            "rate_limit": rate_limiter.health(),
-            "model_quota": llm_module.model_governor.health(),
+            "rate_limit": {
+                "backend": rate_limit_health["backend"],
+                "healthy": rate_limit_health["healthy"],
+            },
+            "model_quota": {
+                "backend": model_quota_health["backend"],
+                "healthy": model_quota_health["healthy"],
+                "fail_open": model_quota_health["fail_open"],
+                "daily_token_limit": model_quota_health["daily_token_limit"],
+                "concurrency_limit": model_quota_health["concurrency_limit"],
+            },
         }
         response["governance"] = governance
         if (
