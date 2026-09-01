@@ -147,6 +147,7 @@ The container image excludes tests, offline evaluation assets, local results, PD
 ## Documentation map
 
 - [Architecture](ARCHITECTURE.md)
+- [Security Policy](SECURITY.md)
 - [Dependency Security and Reproducibility](DEPENDENCY_POLICY.md)
 - [Evaluation](EVALUATION.md)
 - [Research Decisions](RESEARCH_DECISIONS.md)

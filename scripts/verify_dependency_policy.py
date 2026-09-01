@@ -1,4 +1,5 @@
 """Verify the repository's dependency and Chroma security boundaries."""
+import re
 from pathlib import Path
 
 
@@ -13,6 +14,8 @@ LOCKS = (
     ROOT / "legacy_streamlit" / "requirements.txt",
     ROOT / "legacy_streamlit" / "requirements-windows.txt",
 )
+# The current resolver selects these different, compatible pins by platform.
+PLATFORM_VERSION_EXCEPTIONS = {"joblib"}
 
 
 def requirement_lines(path: Path) -> list[str]:
@@ -21,6 +24,16 @@ def requirement_lines(path: Path) -> list[str]:
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip() and not line.lstrip().startswith(("#", "--"))
     ]
+
+
+def lock_versions(path: Path) -> dict[str, str]:
+    versions = {}
+    for line in requirement_lines(path):
+        name, separator, version = line.partition("==")
+        if separator:
+            normalized_name = re.sub(r"[-_.]+", "-", name.split("[", 1)[0].lower())
+            versions[normalized_name] = version
+    return versions
 
 
 def main() -> None:
@@ -32,6 +45,29 @@ def main() -> None:
         unpinned = [line for line in requirement_lines(lock) if "==" not in line]
         if unpinned:
             failures.append(f"unpinned requirements in {lock.relative_to(ROOT)}: {unpinned}")
+
+    platform_pairs = (
+        ("backend/requirements.txt", "backend/requirements-windows.txt"),
+        ("backend/requirements-full.txt", "backend/requirements-full-windows.txt"),
+        ("backend/requirements-dev.txt", "backend/requirements-dev-windows.txt"),
+        (
+            "legacy_streamlit/requirements.txt",
+            "legacy_streamlit/requirements-windows.txt",
+        ),
+    )
+    for linux_relative, windows_relative in platform_pairs:
+        linux_versions = lock_versions(ROOT / linux_relative)
+        windows_versions = lock_versions(ROOT / windows_relative)
+        mismatches = {
+            name: (linux_versions[name], windows_versions[name])
+            for name in linux_versions.keys() & windows_versions.keys()
+            if linux_versions[name] != windows_versions[name]
+            and name not in PLATFORM_VERSION_EXCEPTIONS
+        }
+        if mismatches:
+            failures.append(
+                f"cross-platform version drift in {linux_relative}: {mismatches}"
+            )
 
     production_locks = (
         ROOT / "backend" / "requirements.txt",
