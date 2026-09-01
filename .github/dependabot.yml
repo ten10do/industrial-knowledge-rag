@@ -1,22 +1,8 @@
 version: 2
 
 updates:
-  - package-ecosystem: pip
-    directory: /backend
-    target-branch: main
-    schedule:
-      interval: weekly
-      day: monday
-      time: "09:00"
-      timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
-    groups:
-      backend-dependencies:
-        patterns:
-          - "*"
-    commit-message:
-      prefix: "deps(backend)"
-
+  # Python has generated Linux/Windows locks and is updated through pip-tools.
+  # Repository-level Dependabot alerts and security updates remain enabled.
   - package-ecosystem: npm
     directory: /frontend
     target-branch: main
