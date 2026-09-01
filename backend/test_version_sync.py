@@ -65,6 +65,7 @@ class PublicVersionSynchronizerTests(unittest.TestCase):
         self.assertEqual(status["loaded_version"], "version-1")
         self.assertEqual(status["remote_active_version"], "version-2")
         self.assertEqual(status["last_error"], "download failed")
+        self.assertNotIn("last_error", synchronizer.public_status())
 
     def test_event_invalidates_the_poll_cache(self):
         state = {"active": "version-1", "ready": True}
